@@ -193,20 +193,18 @@ var
   f          : file;
   fsize      : longint;
   bytesRead  : longint;
-  buf        : PFileBuf;
-  content    : AnsiString;
-  search     : AnsiString;
-  patA, patUpA : AnsiString;
-  caseSens, wholeWrd : boolean;
+  buf, upBuf : PFileBuf;
+  searchBuf  : PFileBuf;
+  pat        : string;
   patLen     : integer;
-  lineStarts : array of longint;
-  nLines, cap: longint;
-  hitPos, startPos : longint;
-  row, col   : longint;
-  lineS, lineE, lineLen : longint;
+  firstByte  : byte;
+  caseSens, wholeWrd : boolean;
+  p, lineStart, lineEnd, row : longint;
+  candOff, remain : longint;
+  lastRow    : longint;
+  i, lineLen, col : longint;
   displayBuf : string;
   lok, rok   : boolean;
-  i, lo, hi, mid : longint;
   sinceCheck : longint;
 begin
   if Cancelled or (HitCount >= MaxHits) then exit;
@@ -229,132 +227,124 @@ begin
   caseSens := (FindInFilesRec.Flags and fifCaseSensitive) <> 0;
   wholeWrd := (FindInFilesRec.Flags and fifWholeWord) <> 0;
   patLen   := Length(FindInFilesRec.SearchStr);
-  if patLen = 0 then
+  if (patLen = 0) or (patLen > bytesRead) then
   begin
     FreeMem(buf, fsize);
     exit;
   end;
-  patA   := FindInFilesRec.SearchStr;
-  patUpA := UpString(FindInFilesRec.SearchStr);
-
-  { Copy file bytes into an AnsiString once. }
-  SetLength(content, bytesRead);
-  if bytesRead > 0 then
-    Move(buf^[0], content[1], bytesRead);
-  FreeMem(buf, fsize);
-
-  { Build line-start index: lineStarts[k] = 1-based pos where line
-    (k+1) starts. lineStarts[nLines] is a sentinel past the end. }
-  cap := 256;
-  SetLength(lineStarts, cap);
-  lineStarts[0] := 1;
-  nLines := 1;
-  for i := 1 to bytesRead do
-    if content[i] = #10 then
-    begin
-      if nLines >= cap then
-      begin
-        cap := cap * 2;
-        SetLength(lineStarts, cap);
-      end;
-      lineStarts[nLines] := i + 1;
-      Inc(nLines);
-    end;
-  if nLines >= Length(lineStarts) then
-    SetLength(lineStarts, nLines + 1);
-  lineStarts[nLines] := bytesRead + 1;
-
-  { Build the search buffer. For case-insensitive we uppercase the
-    whole content once (A-Z only; matches how we uppercase the
-    pattern) so every Pos call is a straight byte compare. }
   if caseSens then
-    search := content
+    pat := FindInFilesRec.SearchStr
+  else
+    pat := UpString(FindInFilesRec.SearchStr);
+  firstByte := Ord(pat[1]);
+
+  { For case-insensitive, build an uppercased copy of the buffer.
+    Display text still comes from the original buf so the hit line
+    keeps its original casing. }
+  upBuf := nil;
+  if caseSens then
+    searchBuf := buf
   else
   begin
-    search := content;
-    UniqueString(search);
-    for i := 1 to Length(search) do
-      if search[i] in ['a'..'z'] then
-        search[i] := Chr(Ord(search[i]) - 32);
+    GetMem(upBuf, bytesRead);
+    Move(buf^[0], upBuf^[0], bytesRead);
+    for i := 0 to bytesRead - 1 do
+      if (upBuf^[i] >= $61) and (upBuf^[i] <= $7A) then
+        upBuf^[i] := upBuf^[i] - 32;
+    searchBuf := upBuf;
   end;
 
-  startPos   := 1;
+  p          := 0;
+  lineStart  := 0;
+  row        := 1;
+  lastRow    := 0;
   sinceCheck := 0;
 
-  while (not Cancelled) and (HitCount < MaxHits) do
+  while (p + patLen <= bytesRead) and
+        (not Cancelled) and (HitCount < MaxHits) do
   begin
-    if caseSens then
-      hitPos := Pos(patA, search, startPos)
-    else
-      hitPos := Pos(patUpA, search, startPos);
-    if hitPos = 0 then break;
+    remain := bytesRead - patLen + 1 - p;
+    if remain <= 0 then break;
 
-    { Binary search for the row: largest lo with lineStarts[lo] <= hitPos. }
-    lo := 0;
-    hi := nLines - 1;
-    while lo < hi do
-    begin
-      mid := (lo + hi + 1) shr 1;
-      if lineStarts[mid] <= hitPos then
-        lo := mid
-      else
-        hi := mid - 1;
-    end;
-    row   := lo + 1;
-    lineS := lineStarts[lo];
-    lineE := lineStarts[lo + 1] - 2;
-    if lineE < lineS then lineE := lineS - 1;
-    if (lineE >= lineS) and (content[lineE] = #13) then
-      Dec(lineE);
-    col := hitPos - lineS + 1;
+    { IndexByte skims the buffer for the pattern's first byte.
+      FPC's implementation is asm / SIMD on i386 -- an order of
+      magnitude faster than AnsiString Pos for this loop. }
+    candOff := IndexByte(searchBuf^[p], remain, firstByte);
+    if candOff < 0 then break;
 
-    if wholeWrd then
+    { Count newlines in the skipped region to keep row/lineStart
+      accurate. This is O(bytesRead) total across the whole file. }
+    if candOff > 0 then
     begin
-      lok := hitPos = lineS;
-      if not lok then
-        lok := not IsWordChar(content[hitPos - 1]);
-      rok := hitPos + patLen - 1 >= lineE;
-      if not rok then
-        rok := not IsWordChar(content[hitPos + patLen]);
-      if not (lok and rok) then
-      begin
-        { Advance past this non-word hit and keep searching this
-          line for a valid one. }
-        startPos := hitPos + 1;
-        Inc(sinceCheck);
-        if sinceCheck >= 256 then
+      for i := p to p + candOff - 1 do
+        if buf^[i] = $0A then
         begin
-          sinceCheck := 0;
-          PumpCancel;
+          Inc(row);
+          lineStart := i + 1;
         end;
-        continue;
+      p := p + candOff;
+    end;
+
+    if CompareByte(searchBuf^[p], pat[1], patLen) = 0 then
+    begin
+      if row <> lastRow then
+      begin
+        lok := true; rok := true;
+        if wholeWrd then
+        begin
+          if p > lineStart then
+            lok := not IsWordChar(AnsiChar(searchBuf^[p - 1]));
+          if p + patLen < bytesRead then
+            if (buf^[p + patLen] <> $0A) and
+               (buf^[p + patLen] <> $0D) then
+              rok := not IsWordChar(AnsiChar(searchBuf^[p + patLen]));
+        end;
+
+        if lok and rok then
+        begin
+          lineEnd := p;
+          while (lineEnd < bytesRead) and (buf^[lineEnd] <> $0A) do
+            Inc(lineEnd);
+          if (lineEnd > lineStart) and (buf^[lineEnd - 1] = $0D) then
+            Dec(lineEnd);
+
+          lineLen := lineEnd - lineStart;
+          if lineLen <= 0 then
+            displayBuf := ''
+          else if lineLen > 200 then
+          begin
+            SetLength(displayBuf, 200);
+            Move(buf^[lineStart], displayBuf[1], 200);
+          end
+          else
+          begin
+            SetLength(displayBuf, lineLen);
+            Move(buf^[lineStart], displayBuf[1], lineLen);
+          end;
+          while (Length(displayBuf) > 0) and
+                ((displayBuf[1] = ' ') or (displayBuf[1] = #9)) do
+            Delete(displayBuf, 1, 1);
+
+          col := p - lineStart + 1;
+          AddToolMessage(FullPath, displayBuf, row, col);
+          Inc(HitCount);
+          lastRow := row;
+        end;
       end;
     end;
 
-    { Extract display line (leading whitespace stripped, capped at 200). }
-    lineLen := lineE - lineS + 1;
-    if lineLen <= 0 then
-      displayBuf := ''
-    else if lineLen > 200 then
-      displayBuf := Copy(content, lineS, 200)
-    else
-      displayBuf := Copy(content, lineS, lineLen);
-    while (Length(displayBuf) > 0) and
-          ((displayBuf[1] = ' ') or (displayBuf[1] = #9)) do
-      Delete(displayBuf, 1, 1);
+    Inc(p);
 
-    AddToolMessage(FullPath, displayBuf, row, col);
-    Inc(HitCount);
-
-    { One hit per line: jump to the start of the next line. }
-    startPos := lineStarts[row];
     Inc(sinceCheck);
-    if sinceCheck >= 32 then
+    if sinceCheck >= 4096 then
     begin
       sinceCheck := 0;
       PumpCancel;
     end;
   end;
+
+  if upBuf <> nil then FreeMem(upBuf, bytesRead);
+  FreeMem(buf, fsize);
 end;
 
 { ------------------------------------------------------------------ }
