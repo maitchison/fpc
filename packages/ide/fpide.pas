@@ -120,6 +120,7 @@ type
       procedure Directories;
       procedure Tools;
       procedure DoGrep;
+      procedure DoFindInFiles;
       procedure Preferences;
       procedure EditorOptions(Editor: PEditor);
       procedure CodeComplete;
@@ -194,7 +195,7 @@ uses
   Systems,
   WUtils,WHlpView,WViews,WHTMLHlp,WHelp,WConsole,
   FPConst,FPVars,FPUtils,FPIni,FPIntf,FPCompil,FPHelp,
-  FPTemplt,FPCalc,FPUsrScr,FPTools,
+  FPTemplt,FPCalc,FPUsrScr,FPTools,FPFindF,
 {$ifndef NODEBUG}
   FPDebug,FPRegs,
 {$endif}
@@ -268,6 +269,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_search_find       = '~F~ind...';
                 menu_search_replace    = '~R~eplace...';
                 menu_search_searchagain= '~S~earch again';
+                menu_search_findinfiles= 'Find in F~i~les...';
                 menu_search_jumpline   = '~G~o to line number...';
                 menu_search_findproc   = 'Find ~p~rocedure...';
                 menu_search_previous   = 'Previous ~b~rowser';
@@ -961,6 +963,7 @@ begin
       NewItem(menu_search_find,'', kbNoKey, cmFind, hcFind,
       NewItem(menu_search_replace,'', kbNoKey, cmReplace, hcReplace,
       NewItem(menu_search_searchagain,'', kbNoKey, cmSearchAgain, hcSearchAgain,
+      NewItem(menu_search_findinfiles,'Ctrl+Shift+F', kbNoKey, cmFindInFiles, hcFindInFiles,
       NewLine(
       NewItem(menu_search_jumpline,'', kbNoKey, cmJumpLine, hcGotoLine,
       NewItem(menu_search_findproc,'', kbNoKey, cmFindProcedure, hcFindProcedure,
@@ -971,7 +974,7 @@ begin
       NewItem(menu_search_globals,'', kbNoKey, cmGlobals, hcGlobals,
       NewLine(
       NewItem(menu_search_symbol,'', kbNoKey, cmSymbol, hcSymbol,
-      nil)))))))))))))),
+      nil))))))))))))))),
     NewSubMenu(menu_run,hcRunMenu, NewMenu(
       NewItem(menu_run_run,menu_key_run_run, kbCtrlF9, cmRun, hcRun,
       NewItem(menu_run_stepover,menu_key_run_stepover, kbF8, cmStepOver, hcRun,
@@ -1303,6 +1306,17 @@ begin
   else
     CtrlCCatched:=false;
 {$endif HasSignal}
+  { Ctrl+Shift+F -> Find in Files. DOS BIOS has no combined
+    kbCtrlShiftF keycode, so detect Ctrl+Shift via the KeyShift
+    bitfield ($4 = Ctrl, $3 = either Shift). }
+  if (Event.What=evKeyDown) and
+     (Event.KeyCode=kbCtrlF) and
+     ((Event.KeyShift and $4) <> 0) and
+     ((Event.KeyShift and $3) <> 0) then
+    begin
+      Event.What:=evCommand;
+      Event.Command:=cmFindInFiles;
+    end;
   case Event.What of
        evKeyDown :
          begin
@@ -1353,6 +1367,7 @@ begin
              cmShowClipboard : ShowClipboard;
            { -- Search menu -- }
              cmFindProcedure : FindProcedure;
+             cmFindInFiles   : DoFindInFiles;
              cmObjects       : Objects;
              cmModules       : Modules;
              cmGlobals       : Globals;

@@ -382,3 +382,23 @@ begin
 end;
 
 
+procedure TIDEApp.DoFindInFiles;
+begin
+  if not ExecuteFindInFilesDialog then
+    Exit;
+  Messages;
+  ClearToolMessages;
+  UpdateToolMessages;
+  PushStatus('Searching...');
+  RunFindInFilesSearch;
+  PopStatus;
+  UpdateToolMessages;
+  if Assigned(MessagesWindow) then
+    begin
+      MessagesWindow^.Focus;
+      if (ToolMessages<>nil) and (ToolMessages^.Count>0) then
+        MessagesWindow^.FocusItem(0);
+    end;
+end;
+
+

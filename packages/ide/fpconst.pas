@@ -227,6 +227,7 @@ const
 
      cmPrint             = 248;
      cmSymPrevious       = 249; {previous symbol browser window}
+     cmFindInFiles       = 250; {global Find in Files (Ctrl+Shift+F)}
 
      cmNotImplemented    = 1000;
      cmNewFromTemplate   = 1001;
@@ -345,6 +346,7 @@ const
      hcReplace           = hcShift+cmReplace;
      hcSearchAgain       = hcShift+cmSearchAgain;
      hcGotoLine          = hcShift+cmJumpLine;
+     hcFindInFiles       = hcShift+cmFindInFiles;
 
      hcUserScreen        = hcShift+cmUserScreen;
      hcUserScreenWindow  = hcShift+cmUserScreenWindow;
