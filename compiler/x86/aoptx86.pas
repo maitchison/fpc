@@ -1928,6 +1928,85 @@ unit aoptx86;
                       taicpu(hp2).fileinfo:=taicpu(hp1).fileinfo;
                     end;
                   Result := True;
+                end
+              {
+                For 3-operand IMUL where the destination register is distinct
+                from the source, the destination acts as a free scratch, so
+                multipliers of the form (2^n-1) and (2^n+1) lower to
+                two or three plain ops:
+
+                  imul $X, src, dst   X = 2^n - 1
+                    n in [1..3] (X = 7; 3 falls to the LEA branch above)
+                       lea (,src,2^n), dst ; sub src, dst
+                    n >= 4 (X = 15, 31, 63, ...)
+                       mov src, dst ; shl $n, dst ; sub src, dst
+
+                  imul $X, src, dst   X = 2^n + 1, n >= 4 (X = 17, 33, ...)
+                    (n in [1..3] gives X in [3,5,9], handled above)
+                       mov src, dst ; shl $n, dst ; add src, dst
+
+                The 2-operand form (imul $X, reg) is left alone because
+                rewriting it would require a scratch register, which the
+                peephole pass cannot easily allocate.
+              }
+              else if (taicpu(p).ops = 3) and
+                      (taicpu(p).oper[1]^.reg <> taicpu(p).oper[2]^.reg) then
+                begin
+                  BaseValue := taicpu(p).oper[0]^.val;
+                  if (BaseValue >= 7) and (((BaseValue + 1) and BaseValue) = 0) then
+                    begin
+                      { N = 2^n - 1 }
+                      ShiftValue := BsfQWord(QWord(BaseValue + 1));
+                      if ShiftValue <= 3 then
+                        begin
+                          { lea (,src,2^n), dst }
+                          tmpref.index := taicpu(p).oper[1]^.reg;
+                          tmpref.scalefactor := 1 shl ShiftValue;
+                          hp1 := taicpu.op_ref_reg(A_LEA, opsize, tmpref, taicpu(p).oper[2]^.reg);
+                          AsmL.InsertAfter(hp1, p);
+                          taicpu(hp1).fileinfo := taicpu(p).fileinfo;
+                          hp2 := hp1;
+                        end
+                      else
+                        begin
+                          { mov src, dst ; shl $n, dst }
+                          hp1 := taicpu.op_reg_reg(A_MOV, opsize, taicpu(p).oper[1]^.reg, taicpu(p).oper[2]^.reg);
+                          AsmL.InsertAfter(hp1, p);
+                          taicpu(hp1).fileinfo := taicpu(p).fileinfo;
+                          hp2 := taicpu.op_const_reg(A_SHL, opsize, ShiftValue, taicpu(p).oper[2]^.reg);
+                          AsmL.InsertAfter(hp2, hp1);
+                          taicpu(hp2).fileinfo := taicpu(p).fileinfo;
+                        end;
+                      { sub src, dst (append after the prior tail instruction hp2) }
+                      AsmL.InsertAfter(
+                        taicpu.op_reg_reg(A_SUB, opsize, taicpu(p).oper[1]^.reg, taicpu(p).oper[2]^.reg),
+                        hp2);
+                      taicpu(tai(hp2.next)).fileinfo := taicpu(p).fileinfo;
+                      DebugMsg(SPeepholeOptimization + 'Imul2Pow2Sub done', p);
+                      RemoveCurrentP(p, hp1);
+                      Result := True;
+                    end
+                  else if (BaseValue >= 17) and (((BaseValue - 1) and (BaseValue - 2)) = 0) then
+                    begin
+                      { N = 2^n + 1, n >= 4 }
+                      ShiftValue := BsfQWord(QWord(BaseValue - 1));
+                      { mov src, dst }
+                      hp1 := taicpu.op_reg_reg(A_MOV, opsize, taicpu(p).oper[1]^.reg, taicpu(p).oper[2]^.reg);
+                      AsmL.InsertAfter(hp1, p);
+                      taicpu(hp1).fileinfo := taicpu(p).fileinfo;
+                      { shl $n, dst }
+                      hp2 := taicpu.op_const_reg(A_SHL, opsize, ShiftValue, taicpu(p).oper[2]^.reg);
+                      AsmL.InsertAfter(hp2, hp1);
+                      taicpu(hp2).fileinfo := taicpu(p).fileinfo;
+                      { add src, dst (append after the shl, which is the current tail hp2) }
+                      AsmL.InsertAfter(
+                        taicpu.op_reg_reg(A_ADD, opsize, taicpu(p).oper[1]^.reg, taicpu(p).oper[2]^.reg),
+                        hp2);
+                      taicpu(tai(hp2.next)).fileinfo := taicpu(p).fileinfo;
+                      DebugMsg(SPeepholeOptimization + 'Imul2Pow2Add done', p);
+                      RemoveCurrentP(p, hp1);
+                      Result := True;
+                    end;
                 end;
             end;
       end;
