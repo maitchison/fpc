@@ -85,6 +85,10 @@ begin
   if not OpenIt then
    begin
      GetDir(0,StoreDir);
+     { Always anchor the Open dialog at the IDE's original launch dir,
+       regardless of what the user most recently opened. }
+     if FileDir='' then
+       FileDir:=OrigStartupDir;
      if (Length(FileDir)>1) and (FileDir[2]=':') then
        begin
          { does not assume that lowercase are greater then uppercase ! }
@@ -126,7 +130,6 @@ begin
           begin
             ChDir(DirOf(filename));
             CurDirChanged;
-            GetDir(0,StartUpDir);
           end;
        end
      else
@@ -218,8 +221,6 @@ begin
   New(D, Init(cdNormal, hidChDirDialog));
   ExecuteDialog(D,nil);
   CurDirChanged;
-  { Set new startup dir }
-  GetDir(0,StartUpDir);
 end;
 
 

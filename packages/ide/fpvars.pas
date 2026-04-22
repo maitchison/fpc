@@ -89,6 +89,7 @@ const ClipboardWindow  : PClipboardWindow = nil;
       HelpFiles        : WUtils.PUnsortedStringCollection = nil;
       ShowStatusOnError: boolean = true;
       StartupDir       : string = '.'+DirSep;
+      OrigStartupDir   : string = '.'+DirSep;
       IDEDir           : string = '.'+DirSep;
 {$if defined(WINDOWS) or defined(Unix) or defined(Aros)}
       SystemIDEDir     : string = '';

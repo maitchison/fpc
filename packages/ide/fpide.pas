@@ -1861,6 +1861,7 @@ end;
 procedure TIDEApp.DosShell;
 var
   s : string;
+  SavedDir : string;
 begin
 {$ifdef HASAMIGA}
   s := 'C:NewShell';
@@ -1886,7 +1887,16 @@ begin
   if s='' then
     ErrorBox(msg_errorexecutingshell,nil)
   else
-    DoExecute(s, '', '', '', '', exDosShell);
+    begin
+      { Shell should always start in the IDE's original launch dir,
+        not wherever the last File|Open drifted to. }
+      GetDir(0,SavedDir);
+      {$I-} ChDir(TrimEndSlash(OrigStartupDir)); {$I+}
+      EatIO;
+      DoExecute(s, '', '', '', '', exDosShell);
+      {$I-} ChDir(TrimEndSlash(SavedDir)); {$I+}
+      EatIO;
+    end;
   { In case we have something that the compiler touched }
   AskToReloadAllModifiedFiles;
 end;

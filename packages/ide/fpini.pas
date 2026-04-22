@@ -166,6 +166,7 @@ const
 Procedure InitDirs;
 begin
   StartupDir:=CompleteDir(FExpand('.'));
+  OrigStartupDir:=StartupDir;
 {$ifndef unix}
   IDEDir:=CompleteDir(DirOf(system.Paramstr(0)));
 {$ifdef WINDOWS}
