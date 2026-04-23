@@ -276,11 +276,16 @@ const
       opt_level4optimizations = 'Level ~4~ optimizations';
       { optimization processor target }
       opt_i386486 = 'i~3~86/i486';
-      opt_pentium = 'P~e~ntium (tm)';
-      opt_pentiummmx = 'PentiumMM~X~ (tm)';
-      opt_pentiumpro = '~P~entium2/PentiumM/AMD';
-      opt_pentiumiv = 'Pentium~4~';
-      opt_pentiumm = 'Pentium~M~';
+      { Menu labels for -Cp<cputype> / -Op<cputype>. Note: FPC has no
+        separate cputype for Pentium MMX (P55C) - it shares the P5
+        instruction set with plain Pentium; MMX itself is enabled via
+        -CfMMX, orthogonal to -Cp. Selecting "Pentium II" here gives
+        CMOV and requires a P6-class CPU. }
+      opt_pentium = 'P~e~ntium / Pentium MMX';
+      opt_pentium2 = 'Pentium ~I~I / Pentium Pro';
+      opt_pentium3 = 'Pentium II~I~ (SSE)';
+      opt_pentiumiv = 'Pentium ~4~ (SSE2)';
+      opt_pentiumm = 'Pentium ~M~ (SSE2)';
       opt_m68000 = 'm~6~8000';
       opt_m68020 = 'm680~2~0';
       { Assembler options }
@@ -1304,9 +1309,9 @@ begin
          if st='PENTIUM' then
            st:=opt_pentium;
          if st='PENTIUM2' then
-           st:=opt_pentiummmx;
+           st:=opt_pentium2;
          if st='PENTIUM3' then
-           st:=opt_pentiumpro;
+           st:=opt_pentium3;
          if st='PENTIUM4' then
            st:=opt_pentiumiv;
          if st='PENTIUMM' then
@@ -1334,9 +1339,9 @@ begin
          if st='PENTIUM' then
            st:=opt_pentium;
          if st='PENTIUM2' then
-           st:=opt_pentiummmx;
+           st:=opt_pentium2;
          if st='PENTIUM3' then
-           st:=opt_pentiumpro;
+           st:=opt_pentium3;
          if st='PENTIUM4' then
            st:=opt_pentiumiv;
          if st='PENTIUMM' then
