@@ -155,6 +155,7 @@ type
       InsideDone : boolean;
       LastEvent: longint;
       procedure AddRecentFile(AFileName: string; CurX, CurY: sw_integer);
+      procedure TouchRecentFilePos(AFileName: string; CurX, CurY: sw_integer);
       function  SearchRecentFile(AFileName: string): integer;
       procedure RemoveRecentFile(Index: integer);
     public
@@ -1483,7 +1484,7 @@ begin
              begin
                with PSourceWindow(Event.InfoPtr)^ do
                  if Editor^.FileName<>'' then
-                   AddRecentFile(Editor^.FileName,Editor^.CurPos.X,Editor^.CurPos.Y);
+                   TouchRecentFilePos(Editor^.FileName,Editor^.CurPos.X,Editor^.CurPos.Y);
                {$ifndef NODEBUG}
                if assigned(Debugger) and (PView(Event.InfoPtr)=Debugger^.LastSource) then
                  Debugger^.LastSource:=nil;
@@ -1973,17 +1974,39 @@ end;
 {$I fpmansi.inc}
 
 procedure TIDEApp.AddRecentFile(AFileName: string; CurX, CurY: sw_integer);
+var OldIdx: integer;
 begin
-  if SearchRecentFile(AFileName)<>-1 then Exit;
-  if RecentFileCount>0 then
-   Move(RecentFiles[1],RecentFiles[2],SizeOf(RecentFiles[1])*Min(RecentFileCount,High(RecentFiles)-1));
-  if RecentFileCount<High(RecentFiles) then Inc(RecentFileCount);
+  OldIdx:=SearchRecentFile(AFileName);
+  if OldIdx<>-1 then
+    begin
+      if OldIdx>1 then
+        Move(RecentFiles[1],RecentFiles[2],SizeOf(RecentFiles[1])*(OldIdx-1));
+    end
+  else
+    begin
+      if RecentFileCount>0 then
+        Move(RecentFiles[1],RecentFiles[2],SizeOf(RecentFiles[1])*Min(RecentFileCount,High(RecentFiles)-1));
+      if RecentFileCount<High(RecentFiles) then Inc(RecentFileCount);
+    end;
   with RecentFiles[1] do
   begin
     FileName:=AFileName;
     LastPos.X:=CurX; LastPos.Y:=CurY;
   end;
   UpdateRecentFileList;
+end;
+
+procedure TIDEApp.TouchRecentFilePos(AFileName: string; CurX, CurY: sw_integer);
+var Idx: integer;
+begin
+  Idx:=SearchRecentFile(AFileName);
+  if Idx=-1 then
+    AddRecentFile(AFileName,CurX,CurY)
+  else
+    with RecentFiles[Idx] do
+      begin
+        LastPos.X:=CurX; LastPos.Y:=CurY;
+      end;
 end;
 
 function TIDEApp.SearchRecentFile(AFileName: string): integer;

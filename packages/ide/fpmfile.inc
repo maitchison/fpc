@@ -125,7 +125,8 @@ begin
      if ExistsFile(FileName) then
        begin
      { like for BP unexistant files should  be created PM }
-         OpenEditorWindow(nil,FileName,0,0);
+         if OpenEditorWindow(nil,FileName,0,0)<>nil then
+           AddRecentFile(FileName,0,0);
          if (MiscOptions and moChangeDirOnOpen)<>0 then
           begin
             ChDir(DirOf(filename));
@@ -177,7 +178,8 @@ begin
              Debugger^.SetSourceDirs;
            {$ENDIF}
          end;
-     OpenEditorWindow(nil,FileName,0,0);
+     if OpenEditorWindow(nil,FileName,0,0)<>nil then
+       AddRecentFile(FileName,0,0);
    end;
   OpenSearch:=OpenIt;
 end;
@@ -187,7 +189,7 @@ procedure TIDEApp.OpenRecentFile(RecentIndex: integer);
 begin
   with RecentFiles[RecentIndex] do
   if OpenEditorWindow(nil,FileName,LastPos.X,LastPos.Y)<>nil then
-     RemoveRecentFile(RecentIndex);
+     AddRecentFile(FileName,LastPos.X,LastPos.Y);
 end;
 
 function TIDEApp.AskSaveAll: boolean;
