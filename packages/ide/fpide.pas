@@ -76,6 +76,7 @@ type
       procedure Modules;
       procedure Globals;
       procedure SearchSymbol;
+      procedure DoJumpToAsm;
       procedure RunDir;
       procedure Parameters;
       procedure DoStepOver;
@@ -277,6 +278,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_search_modules    = 'Mod~u~les';
                 menu_search_globals    = 'G~l~obals';
                 menu_search_symbol     = 'S~y~mbol...';
+                menu_search_jumptoasm  = 'Jump to ~a~sm source';
 
                 menu_run               = '~R~un';
                 menu_run_run           = '~R~un';
@@ -974,7 +976,9 @@ begin
       NewItem(menu_search_globals,'', kbNoKey, cmGlobals, hcGlobals,
       NewLine(
       NewItem(menu_search_symbol,'', kbNoKey, cmSymbol, hcSymbol,
-      nil))))))))))))))),
+      NewLine(
+      NewItem(menu_search_jumptoasm,'Alt+A', kbAltA, cmJumpToAsm, hcJumpToAsm,
+      nil))))))))))))))))),
     NewSubMenu(menu_run,hcRunMenu, NewMenu(
       NewItem(menu_run_run,menu_key_run_run, kbCtrlF9, cmRun, hcRun,
       NewItem(menu_run_stepover,menu_key_run_stepover, kbF8, cmStepOver, hcRun,
@@ -1372,6 +1376,7 @@ begin
              cmModules       : Modules;
              cmGlobals       : Globals;
              cmSymbol        : SearchSymbol;
+             cmJumpToAsm     : DoJumpToAsm;
            { -- Run menu -- }
              cmRunDir        : RunDir;
              cmParameters    : Parameters;

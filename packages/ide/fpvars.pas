@@ -124,6 +124,9 @@ const INIFileName      : string = ININame;
 {$endif USE_EXTERNAL_COMPILER}
       ShowReadme       : boolean = true;
       AskRecompileIfModifiedFlag : boolean = true;
+      { Internal: when Jump-to-Asm finds no .s file, recompile current unit
+        with -al first. Turn off to require manual -al build. }
+      AutoCompileAsm   : boolean = true;
 
       EditKeys:Tedit_key_modes = ekm_default;
 

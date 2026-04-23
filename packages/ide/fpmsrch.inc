@@ -236,3 +236,112 @@ begin
     OpenOneSymbolBrowser(S);
 end;
 
+procedure TIDEApp.DoJumpToAsm;
+{ Jump from the current source line to the matching spot in the compiler-
+  emitted .s listing. Requires the .s to have been written with -al so it
+  contains "# [file]" and "# [NN] ..." comment markers. If the current
+  source line has no asm of its own (comment / blank / decl line), lands
+  on the first emitted line >= the current line. }
+var
+  EditorWin, AsmWin : PSourceWindow;
+  SrcFile, AsmFile, AsmName, ExePath : string;
+  D : DirStr;
+  N : NameStr;
+  E : ExtStr;
+  SrcLine, FoundLine, LineIdx, ParsedLine : longint;
+  F : Text;
+  Line, OurFileMarker : string;
+  InOurFile, Sought : boolean;
+  p : integer;
+
+  function LocateAsm : string;
+  begin
+    if (ExePath<>'') and ExistsFile(ExePath+AsmName) then
+      LocateAsm := ExePath+AsmName
+    else if ExistsFile(D+AsmName) then
+      LocateAsm := D+AsmName
+    else
+      LocateAsm := '';
+  end;
+
+begin
+  EditorWin := FirstEditorWindow;
+  if EditorWin = nil then
+    begin ErrorBox('No source file open.',nil); Exit; end;
+  SrcFile := EditorWin^.Editor^.FileName;
+  SrcLine := EditorWin^.Editor^.CurPos.Y + 1;
+  if SrcFile = '' then
+    begin ErrorBox('Save the source file first.',nil); Exit; end;
+
+  SrcFile := FExpand(SrcFile);
+  FSplit(SrcFile,D,N,E);
+  AsmName := N+'.s';
+  ExePath := GetExePath;
+
+  AsmFile := LocateAsm;
+  if (AsmFile='') and AutoCompileAsm then
+    begin
+      DoCompile(cCompileAsm);
+      AsmFile := LocateAsm;
+    end;
+  if AsmFile = '' then
+    begin
+      ErrorBox('No .s file for '+N+E+'. Compile with -al first.',nil);
+      Exit;
+    end;
+
+  OurFileMarker := '# ['+UpcaseStr(NameAndExtOf(SrcFile))+']';
+  FoundLine := 0;
+  LineIdx := 0;
+  InOurFile := false;
+  Sought := false;
+
+  {$I-}
+  Assign(F,AsmFile);
+  Reset(F);
+  if IOResult<>0 then
+    begin ErrorBox('Cannot open '+AsmFile,nil); Exit; end;
+  while not Eof(F) and not Sought do
+    begin
+      ReadLn(F,Line);
+      Inc(LineIdx);
+      if (Length(Line)>=4) and (Line[1]='#') and (Line[2]=' ') and (Line[3]='[') then
+        begin
+          if Line[4] in ['0'..'9'] then
+            begin
+              if InOurFile then
+                begin
+                  ParsedLine := 0;
+                  p := 4;
+                  while (p<=Length(Line)) and (Line[p] in ['0'..'9']) do
+                    begin
+                      ParsedLine := ParsedLine*10 + Ord(Line[p]) - Ord('0');
+                      Inc(p);
+                    end;
+                  if (p<=Length(Line)) and (Line[p]=']') and (ParsedLine >= SrcLine) then
+                    begin
+                      FoundLine := LineIdx;
+                      Sought := true;
+                    end;
+                end;
+            end
+          else
+            InOurFile := UpcaseStr(Line)=OurFileMarker;
+        end;
+    end;
+  Close(F);
+  if IOResult<>0 then ;
+  {$I+}
+
+  if FoundLine=0 then
+    AsmWin := TryToOpenFile(nil,AsmFile,0,0,false)
+  else
+    AsmWin := TryToOpenFile(nil,AsmFile,0,FoundLine-1,false);
+  if Assigned(AsmWin) then
+    begin
+      AsmWin^.Select;
+      AsmWin^.Editor^.TrackCursor(do_centre);
+    end;
+end;
+
+

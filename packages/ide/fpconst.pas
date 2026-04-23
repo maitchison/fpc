@@ -309,6 +309,7 @@ const
      cmDebuggerStopped   = 2600;
      cmDisassemble       = 2601;
      cmContinue          = 2602;
+     cmJumpToAsm         = 2603;
 
      cmSymBrowse         = 2700;
      cmSymGotoSource     = 2701;
@@ -474,6 +475,7 @@ const
      hcEditorOptions     = hcShift+cmEditorOptions;
      hcBrowserOptions    = hcShift+cmBrowserOptions;
      hcDoReload          = hcShift+cmDoReload;
+     hcJumpToAsm         = hcShift+cmJumpToAsm;
 
      CIDEHelpDialog      =
         #128#129#130#131#132#133#134#135#136#137#138#139#140#141#142#143 +

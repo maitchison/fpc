@@ -39,7 +39,7 @@ uses
   FPViews;
 
 type
-  TCompileMode = (cBuild,cMake,cCompile,cRun);
+  TCompileMode = (cBuild,cMake,cCompile,cRun,cCompileAsm);
 
 type
     PCompilerMessage = ^TCompilerMessage;
@@ -109,6 +109,7 @@ const
 
 procedure DoCompile(Mode: TCompileMode);
 function  NeedRecompile(Mode :TCompileMode; verbose : boolean): boolean;
+function  GetExePath: string;
 procedure ParseUserScreen;
 
 procedure RegisterFPCompile;
@@ -855,7 +856,7 @@ begin
     FileName:='' { nothing to compile }
   else
     begin
-      if (PrimaryFileMain<>'') and (Mode<>cCompile) then
+      if (PrimaryFileMain<>'') and not (Mode in [cCompile,cCompileAsm]) then
         FileName:=PrimaryFileMain
       else if assigned(P) then
         begin
@@ -983,6 +984,8 @@ begin
     FileName:='"'+FileName+'"';
   if mode=cBuild then
     FileName:='-B '+FileName;
+  if mode=cCompileAsm then
+    FileName:='-al '+FileName;
   { tokens are created and destroyed by compiler.compile !! PM }
   DoneTokens;
   PPasFile:='ppas'+source_info.scriptext;
