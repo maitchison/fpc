@@ -44,6 +44,7 @@ type
       procedure   InitStatusLine; virtual;
       procedure   Open(FileName: string;FileDir:string);
       function    OpenSearch(FileName: string) : boolean;
+      procedure   OpenByName;
       function    AskSaveAll: boolean;
       function    SaveAll: boolean;
       function    AutoSave: boolean;
@@ -232,6 +233,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_file_new          = '~N~ew';
                 menu_file_template     = 'New from ~t~emplate...';
                 menu_file_open         = '~O~pen...';
+                menu_file_openbyname   = 'Open file by na~m~e...';
                 menu_file_save         = '~S~ave';
                 menu_file_saveas       = 'Save ~a~s...';
                 menu_file_saveall      = 'Save a~l~l';
@@ -395,6 +397,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
 
                 { short cut entries in menu }
                 menu_key_file_open     = 'F3';
+                menu_key_file_openbyname='Ctrl+U';
                 menu_key_file_save     = 'F2';
                 menu_key_file_exit     = 'Alt+X';
 
@@ -485,6 +488,11 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 dialog_fillintemplateparameter = 'Fill in template parameter';
                 dialog_calculator       = 'Calculator';
                 dialog_openafile        = 'Open a file';
+                dialog_openbyname       = 'Open file by name';
+                label_openbyname_filter = '~F~ile:';
+                label_openbyname_counts = '%d of %d';
+                label_openbyname_nomatches = '(no matches)';
+                label_openbyname_empty  = '(no .pas/.inc files in search path)';
                 dialog_browsesymbol = 'Browse Symbol';
 
                 msg_confirmsourcediradd = 'Directory %s is not in search path for source files. '+
@@ -928,6 +936,7 @@ begin
       NewItem(menu_file_new,'',kbNoKey,cmNew,hcNew,
       NewItem(menu_file_template,'',kbNoKey,cmNewFromTemplate,hcNewFromTemplate,
       NewItem(menu_file_open,menu_key_file_open,kbF3,cmOpen,hcOpen,
+      NewItem(menu_file_openbyname,menu_key_file_openbyname,kbCtrlU,cmOpenByName,hcOpenByName,
       NewItem(menu_file_reload,'',kbNoKey,cmDoReload,hcDoReload,
       NewItem(menu_file_save,menu_key_file_save,kbF2,cmSave,hcSave,
       NewItem(menu_file_saveas,'',kbNoKey,cmSaveAs,hcSaveAs,
@@ -939,7 +948,7 @@ begin
       NewItem(menu_file_changedir,'',kbNoKey,cmChangeDir,hcChangeDir,
       NewItem(menu_file_dosshell,'',kbNoKey,cmDOSShell,hcDOSShell,
       NewItem(menu_file_exit,menu_key_file_exit,kbNoKey,cmQuit,hcQuit,
-      nil))))))))))))))),
+      nil)))))))))))))))),
     NewSubMenu(menu_edit,hcEditMenu, NewMenu(
       NewItem(menu_edit_undo,menu_key_edit_undo, kbAltBack, cmUndo, hcUndo,
       NewItem(menu_edit_redo,'', kbNoKey, cmRedo, hcRedo,
@@ -1360,6 +1369,7 @@ begin
                                    end;
                                  OpenFileName:='';
                                end;
+             cmOpenByName    : OpenByName;
              cmPrint         : Print;
              cmPrinterSetup  : PrinterSetup;
              cmSaveAll       : SaveAll;
@@ -1952,6 +1962,8 @@ begin
 end;
 
 {$I FPMFILE.INC}
+
+{$I FPMOPENQ.INC}
 
 {$I FPMEDIT.INC}
 

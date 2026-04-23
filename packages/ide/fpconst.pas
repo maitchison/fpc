@@ -233,6 +233,9 @@ const
      cmNewFromTemplate   = 1001;
      cmShowReadme        = 1002;
      cmPrinterSetup      = 1003;
+     cmOpenByName        = 1004; {quick-open file by name (Ctrl+U)}
+     cmOpenByNameChanged = 1005; {broadcast: quick-open input line changed}
+     cmOpenByNameNav     = 1006; {broadcast: quick-open nav key from input line}
 
      cmSearchWindow      = 1500;
      cmSourceWndClosing  = 1601;
@@ -384,6 +387,7 @@ const
      hcCodeTemplateOptions=hcShift+cmCodeTemplateOptions;
      hcAbout             = hcShift+cmAbout;
      hcCompilerMessages  = hcShift+cmCompilerMessages;
+     hcOpenByName        = hcShift+cmOpenByName;
 
      hcSystemMenu        = 9000;
      hcFileMenu          = 9001;
