@@ -2819,6 +2819,7 @@ Procedure SysResetFPU;
 procedure fpc_cpucodeinit;
   var
     _eax,_ecx_cpuid1,_edx_cpuid1,_ebx_cpuid7 : longint;
+    fpu_probe_in, fpu_probe_out : int64;
   begin
     if cpuid_support then
       begin
@@ -2894,6 +2895,19 @@ procedure fpc_cpucodeinit;
       end;
 
     SysResetFPU;
+
+    { Probe x87 precision: round-trip an int64 through fild/fistp.
+      On a real 80-bit FPU this is lossless. Some emulators run the FPU
+      at 64-bit mantissa precision and corrupt the value, which makes
+      the FPU-based Move fastpath unsafe. }
+    fpu_probe_in := int64($7FFFFFFFFFFFFFFF);
+    fpu_probe_out := 0;
+    asm
+      fildq  fpu_probe_in
+      fistpq fpu_probe_out
+    end;
+    fpu_extended_precision_broken := (fpu_probe_out <> fpu_probe_in);
+
     fpc_cpucodeinit_performed:=true;
   end;
 

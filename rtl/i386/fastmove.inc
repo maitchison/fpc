@@ -40,6 +40,70 @@ asm
     pop    %ebx
 end;
 
+{ Plain integer fallback used when FPU Move is unsafe or undesired
+  (runtime probe flagged FPU as broken, or FASTMOVE_DISABLE_FPU set).
+  Forward path: head bytes to 4-align dst, then rep movsl for the
+  bulk (~4x fewer iterations than rep movsb), then byte tail.
+  Backward-overlap kept byte-granular — overlap is uncommon and
+  dword-backward needs messier pointer math for little gain.
+  Touches neither the x87 nor the MMX register file. }
+procedure Move_8OrMore_Plain; assembler; nostackframe;
+{ eax = source, edx = dest, ecx = count (ecx >= 8).
+  If FPC_PIC: ebx pushed. }
+asm
+{$ifdef FPC_PIC}
+    pop    %ebx
+{$endif}
+    sub    %eax, %edx            { edx = dest - src (offset, used by overlap check) }
+    cmp    %edx, %ecx
+    ja     .LPlainBack           { overlap -> copy backward byte-by-byte }
+
+{$ifdef FPC_ENABLED_CLD}
+    cld
+{$endif FPC_ENABLED_CLD}
+    push   %esi
+    push   %edi
+    mov    %eax, %esi             { esi = src }
+    lea    (%edx,%eax), %edi      { edi = dst = src + (dst-src) }
+
+    { Align dst (edi) to 4-byte boundary: move 0..3 head bytes. }
+    mov    %edi, %edx
+    neg    %edx
+    and    $3, %edx                { edx = head byte count (0..3) }
+    sub    %edx, %ecx               { ecx -= head bytes; ecx still >= 5 (entry >=8) }
+    xchg   %ecx, %edx               { ecx = head, edx = remaining }
+    rep    movsb                     { head -> dst now 4-aligned }
+    mov    %edx, %ecx               { ecx = remaining }
+
+    { Bulk: rep movsl on aligned dst. }
+    mov    %ecx, %edx               { save remaining for tail calc }
+    shr    $2, %ecx                  { dword count }
+    rep    movsl
+
+    { Tail: 0..3 bytes. }
+    mov    %edx, %ecx
+    and    $3, %ecx
+    rep    movsb
+
+    pop    %edi
+    pop    %esi
+    ret
+
+.LPlainBack:
+{$ifdef FPC_ENABLED_CLD}
+    cld
+{$endif FPC_ENABLED_CLD}
+    push   %ebx
+    add    %ecx, %eax
+.LPlainNextb:
+    dec    %eax
+    mov    (%eax), %bl
+    mov    %bl, (%edx,%eax)
+    dec    %ecx
+    jnz    .LPlainNextb
+    pop    %ebx
+end;
+
 {$if not defined(CPUX86_HAS_SSEUNIT) or defined(FASTMOVE_DISABLE_SSE)}
 {$define fastmove_has_ia32_and_mmx}
 procedure Move_8OrMore_IA32; assembler; nostackframe;
@@ -171,10 +235,10 @@ asm
 
     .balign 16
 .Lloop16f:
-    movq   (%eax,%edx), %mm0
-    movq   %mm0, (%edx)
-    movq   8(%eax,%edx), %mm0
-    movq   %mm0, 8(%edx)
+    movq   (%eax,%edx), %mm0      { two independent loads first... }
+    movq   8(%eax,%edx), %mm1
+    movq   %mm0, (%edx)           { ...then two stores, breaks load-store serialisation on mm0 }
+    movq   %mm1, 8(%edx)
     add    $16, %edx
     sub    $16, %ecx
     ja     .Lloop16f
@@ -204,10 +268,10 @@ asm
     .balign 16                   { no-op }
 .Lloop16b:
     sub    $16, %edx
-    movq   8(%eax,%edx), %mm0
-    movq   %mm0, 8(%edx)
-    movq   (%eax,%edx), %mm0
-    movq   %mm0, (%edx)
+    movq   8(%eax,%edx), %mm0     { two independent loads first... }
+    movq   (%eax,%edx), %mm1
+    movq   %mm0, 8(%edx)          { ...then two stores, breaks load-store serialisation on mm0 }
+    movq   %mm1, (%edx)
     sub    $16, %ecx
     ja     .Lloop16b
 
@@ -571,10 +635,20 @@ begin
     result:=@Move_8OrMore_SSE
 {$endif ndef FASTMOVE_DISABLE_SSE}
 {$ifdef fastmove_has_ia32_and_mmx}
+  {$ifdef FASTMOVE_DISABLE_FPU}
+  { Build-time opt-out for MMX-heavy apps: bypass both the FPU (fildq)
+    and MMX (movq through mm regs) paths so Move never perturbs the
+    x87 register file or forces an emms. }
+  else
+    result:=@Move_8OrMore_Plain
+  {$else}
+  else if fpu_extended_precision_broken then
+    result:=@Move_8OrMore_Plain { rep movsd is FPU-safe }
   else if has_mmx_support then
     result:=@Move_8OrMore_MMX
   else
     result:=@Move_8OrMore_IA32
+  {$endif FASTMOVE_DISABLE_FPU}
 {$endif fastmove_has_ia32_and_mmx};
   if fpc_cpucodeinit_performed then
     fastmoveproc:=result;

@@ -32,6 +32,13 @@ const
   has_mmx_support : boolean = false;
   has_avx_support : boolean = false;
   has_avx2_support : boolean = false;
+  { Set true at startup if the FPU does not preserve the full 64-bit
+    integer mantissa across a fild qword / fistp qword round-trip.
+    Indicates 80-bit-extended is being emulated at 64-bit precision
+    (em-dosbox in the browser, 86Box default FPU, some DOSBox-X cores).
+    Move's FPU-based fastpath is unsafe in that case and the dispatcher
+    routes around it. }
+  fpu_extended_precision_broken : boolean = false;
 
 {$i cpuinnr.inc}
 
