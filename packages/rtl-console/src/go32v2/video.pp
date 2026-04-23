@@ -46,6 +46,12 @@ uses
   { used to know if LastCursorType is valid }
 const
   LastCursorType : word = crUnderline;
+  { max cursor scan-line index for the active text-mode font.
+    Updated in SysInitVideo from BIOS INT 10h, AX=1130h (CX = scan
+    lines per character cell). Default 7 matches an 8-line font;
+    real VGA 80x25 uses a 16-line font, so leaving this at 7
+    produces an oversized, mid-cell underline cursor. }
+  MaxCursorLines : byte = 7;
 
 { always set blink state again }
 
@@ -112,7 +118,19 @@ begin
        regs.bx:=0;
        realintr($10,regs);
        ScreenHeight:=regs.dl+1;
+       if regs.cx > 0 then
+         MaxCursorLines := byte(regs.cx) - 1;
        BIOSGetScreenMode(ScreenWidth,ScreenHeight,ScreenColor);
+    end
+  else
+    begin
+      { ScreenWidth/Height already known: still query font height
+        so the cursor is sized correctly. }
+      regs.ax:=$1130;
+      regs.bx:=0;
+      realintr($10,regs);
+      if regs.cx > 0 then
+        MaxCursorLines := byte(regs.cx) - 1;
     end;
   regs.ah:=$03;
   regs.bh:=0;
@@ -180,8 +198,6 @@ end;
 procedure SysSetCursorType(NewType: Word);
 var
   regs : trealregs;
-const
-  MaxCursorLines = 7;
 begin
   regs.ah:=$01;
   regs.bx:=NewType;
