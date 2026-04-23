@@ -335,6 +335,40 @@ asm
 end;
 {$endif ndef CPUX86_HAS_SSE2 (need Fill*_Plain)}
 
+{$ifndef CPUX86_HAS_SSE2}
+{ MMX fill helper. Caller supplies a preloaded qword pattern in mm0.
+  Signature: eax = x, edx = byte count (>= 17), mm0 = pattern.
+  Writes 16 bytes/iter via two movq stores through the store buffer; head
+  and tail are written unaligned with overlap; aligned interior is 8-byte-
+  aligned. Zero-iter case (middle < 16 bytes) guarded before the loop;
+  0/1 residual aligned qword handled after. Exits with emms. }
+procedure FillXxxx_U32Pattern_MMX_16OrMore; assembler; nostackframe;
+asm
+        movq    %mm0, (%eax)              { head: first 8 unaligned }
+        lea     8(%eax), %ecx
+        and     $-8, %ecx                  { ecx = first aligned inner (>= x+1) }
+        add     %eax, %edx                 { edx = end pointer }
+        lea     -16(%edx), %eax            { eax = end-16 = loop upper bound
+                                             (x no longer needed) }
+        cmp     %eax, %ecx
+        ja      .LafterLoop                { 0-iter guard: middle < 16 }
+.Lloop16:
+        movq    %mm0, (%ecx)
+        movq    %mm0, 8(%ecx)
+        add     $16, %ecx
+        cmp     %eax, %ecx
+        jbe     .Lloop16
+.LafterLoop:
+        lea     8(%eax), %eax              { eax = end-8 = tail start }
+        cmp     %eax, %ecx
+        ja      .Ltail                     { no residual aligned qword }
+        movq    %mm0, (%ecx)               { one residual aligned qword }
+.Ltail:
+        movq    %mm0, -8(%edx)             { tail: last 8 unaligned }
+        emms
+end;
+{$endif ndef CPUX86_HAS_SSE2 (need Fill*_MMX)}
+
 procedure FillXxxx_U32Pattern_Ladder_4to16; assembler; nostackframe;
 { eax — x, ecx — uint32 pattern, edx — byte count, 4 <= edx <= 16. }
 asm
@@ -375,6 +409,20 @@ asm
         cmp     $16, %edx
         jbe     FillXxxx_U32Pattern_Ladder_4to16
         jmp     FillXxxx_U32Pattern_Plain_16OrMore
+end;
+
+procedure FillChar_MMX(var x;count:SizeInt;value:byte);assembler;nostackframe;
+asm
+        cmp     $3, %edx
+        jle     FillChar_3OrLess
+
+        movzbl  %cl, %ecx
+        imul    $0x01010101, %ecx          { u32 pattern for ladder or broadcast }
+        cmp     $16, %edx
+        jbe     FillXxxx_U32Pattern_Ladder_4to16   { small: integer, no MMX dirty }
+        movd    %ecx, %mm0
+        punpckldq %mm0, %mm0                { broadcast u32 -> qword in mm0 }
+        jmp     FillXxxx_U32Pattern_MMX_16OrMore
 end;
 {$endif ndef CPUX86_HAS_SSE2}
 
@@ -427,7 +475,9 @@ procedure FillChar_Dispatch(var x;count:SizeInt;value:byte);
 begin
   if not fpc_cpucodeinit_performed then
     begin
-      {$ifdef CPUX86_HAS_SSE2} FillChar_SSE2 {$else} FillChar_Plain {$endif} (x, count, value);
+      {$if defined(CPUX86_HAS_SSE2)} FillChar_SSE2
+      {$elseif defined(CPUX86_HAS_MMX)} FillChar_MMX
+      {$else} FillChar_Plain {$endif} (x, count, value);
       exit;
     end;
   if fast_large_repmovstosb then
@@ -435,8 +485,15 @@ begin
   else {$ifndef CPUX86_HAS_SSE2} if has_sse2_support then {$endif}
     FillChar_Impl := @FillChar_SSE2
 {$ifndef CPUX86_HAS_SSE2}
+  {$ifdef CPUX86_HAS_MMX}
+  else
+    FillChar_Impl := @FillChar_MMX
+  {$else}
+  else if has_mmx_support then
+    FillChar_Impl := @FillChar_MMX
   else
     FillChar_Impl := @FillChar_Plain
+  {$endif}
 {$endif ndef CPUX86_HAS_SSE2};
   FillChar_Impl(x, count, value);
 end;
@@ -473,6 +530,21 @@ asm
         cmp     $16, %edx
         jbe     FillXxxx_U32Pattern_Ladder_4to16
         jmp     FillXxxx_U32Pattern_Plain_16OrMore
+end;
+
+procedure FillWord_MMX(var x;count:SizeInt;value:word);assembler;nostackframe;
+asm
+        cmp     $3, %edx
+        jle     FillWord_3OrLess
+
+        shl     $1, %edx
+        movzwl  %cx, %ecx
+        imul    $0x00010001, %ecx
+        cmp     $16, %edx
+        jbe     FillXxxx_U32Pattern_Ladder_4to16
+        movd    %ecx, %mm0
+        punpckldq %mm0, %mm0
+        jmp     FillXxxx_U32Pattern_MMX_16OrMore
 end;
 {$endif ndef CPUX86_HAS_SSE2}
 
@@ -515,7 +587,9 @@ procedure FillWord_Dispatch(var x;count:SizeInt;value:word);
 begin
   if not fpc_cpucodeinit_performed then
     begin
-      {$ifdef CPUX86_HAS_SSE2} FillWord_SSE2 {$else} FillWord_Plain {$endif} (x, count, value);
+      {$if defined(CPUX86_HAS_SSE2)} FillWord_SSE2
+      {$elseif defined(CPUX86_HAS_MMX)} FillWord_MMX
+      {$else} FillWord_Plain {$endif} (x, count, value);
       exit;
     end;
   if fast_large_repmovstosb then
@@ -523,8 +597,15 @@ begin
   else {$ifndef CPUX86_HAS_SSE2} if has_sse2_support then {$endif}
     FillWord_Impl := @FillWord_SSE2
 {$ifndef CPUX86_HAS_SSE2}
+  {$ifdef CPUX86_HAS_MMX}
+  else
+    FillWord_Impl := @FillWord_MMX
+  {$else}
+  else if has_mmx_support then
+    FillWord_Impl := @FillWord_MMX
   else
     FillWord_Impl := @FillWord_Plain
+  {$endif}
 {$endif ndef CPUX86_HAS_SSE2};
   FillWord_Impl(x, count, value);
 end;
@@ -558,6 +639,17 @@ asm
         shl     $2, %edx
         jmp     FillXxxx_U32Pattern_Plain_16OrMore
 end;
+
+procedure FillDWord_MMX(var x;count:SizeInt;value:dword);assembler;nostackframe;
+asm
+        cmp     $4, %edx
+        jle     FillDWord_4OrLess
+        shl     $2, %edx                   { count dwords -> bytes, same as Plain }
+        { ecx already holds the u32 pattern }
+        movd    %ecx, %mm0
+        punpckldq %mm0, %mm0
+        jmp     FillXxxx_U32Pattern_MMX_16OrMore
+end;
 {$endif ndef CPUX86_HAS_SSE2}
 
 procedure FillDWord_SSE2(var x;count:SizeInt;value:dword);assembler;nostackframe;
@@ -589,7 +681,9 @@ procedure FillDWord_Dispatch(var x;count:SizeInt;value:dword);
 begin
   if not fpc_cpucodeinit_performed then
     begin
-      {$ifdef CPUX86_HAS_SSE2} FillDWord_SSE2 {$else} FillDWord_Plain {$endif}(x, count, value);
+      {$if defined(CPUX86_HAS_SSE2)} FillDWord_SSE2
+      {$elseif defined(CPUX86_HAS_MMX)} FillDWord_MMX
+      {$else} FillDWord_Plain {$endif}(x, count, value);
       exit;
     end;
   if fast_large_repmovstosb then
@@ -597,8 +691,15 @@ begin
   else {$ifndef CPUX86_HAS_SSE2} if has_sse2_support then {$endif}
     FillDWord_Impl := @FillDWord_SSE2
 {$ifndef CPUX86_HAS_SSE2}
+  {$ifdef CPUX86_HAS_MMX}
+  else
+    FillDWord_Impl := @FillDWord_MMX
+  {$else}
+  else if has_mmx_support then
+    FillDWord_Impl := @FillDWord_MMX
   else
     FillDWord_Impl := @FillDWord_Plain
+  {$endif}
 {$endif ndef CPUX86_HAS_SSE2};
   FillDWord_Impl(x, count, value);
 end;
@@ -630,6 +731,32 @@ asm
         jnz     .LLoop
         pop     %esi
 .LQuit:
+end;
+
+procedure FillQWord_MMX(var x;count:SizeInt;value:QWord);assembler;nostackframe;
+{ eax = x, edx = count (qwords), [esp + 4] = value. }
+asm
+        cmp     $2, %edx
+        jle     .L2OrLess                  { 0..2 qwords: scalar mov overlap trick }
+        movq    4(%esp), %mm0               { qword already qword-shaped - no broadcast }
+        shl     $3, %edx                    { qword count -> byte count }
+        jmp     FillXxxx_U32Pattern_MMX_16OrMore
+
+.L2OrLess:
+        cmp     $1, %edx
+        jl      .LQuit                      { count <= 0: no-op }
+        mov     4(%esp), %ecx               { value[0:31] }
+        mov     %ecx, (%eax)                 { [x+0..+3] }
+        je      .LSecondHalfOf1              { count=1: jump after writing [x+0..+3] }
+        mov     %ecx, -8(%eax,%edx,8)        { count=2: [end-8..-5] }
+        mov     8(%esp), %ecx                { value[32:63] }
+        mov     %ecx, 4(%eax)                { [x+4..+7] }
+        mov     %ecx, -4(%eax,%edx,8)        { [end-4..-1] }
+.LQuit:
+        ret     $8
+.LSecondHalfOf1:
+        mov     8(%esp), %ecx
+        mov     %ecx, 4(%eax)                { [x+4..+7] }
 end;
 {$endif ndef CPUX86_HAS_SSE2}
 
@@ -696,13 +823,24 @@ procedure FillQWord_Dispatch(var x;count:SizeInt;value:qword);
 begin
   if not fpc_cpucodeinit_performed then
     begin
+      {$ifdef CPUX86_HAS_MMX}
+      FillQWord_MMX(x, count, value);
+      {$else}
       FillQWord_Plain(x, count, value);
+      {$endif}
       exit;
     end;
   if has_sse2_support then
     FillQWord_Impl := @FillQWord_SSE2
+  {$ifdef CPUX86_HAS_MMX}
+  else
+    FillQWord_Impl := @FillQWord_MMX;
+  {$else}
+  else if has_mmx_support then
+    FillQWord_Impl := @FillQWord_MMX
   else
     FillQWord_Impl := @FillQWord_Plain;
+  {$endif}
   FillQWord_Impl(x, count, value);
 end;
 
