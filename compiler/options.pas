@@ -4887,6 +4887,20 @@ procedure read_arguments(cmd:TCmdStr);
         def_system_macro('FPC_HAS_LWSYNC');
       {$endif}
 
+      {$if defined(i386) or defined(x86_64)}
+      { Auto-emit x86 capability symbols based on the selected -Cp<cputype>.
+        Lets RTL and user code read $ifdef CPUX86_HAS_MMX etc. without having
+        to pass -dCPUX86_HAS_MMX manually. Only the flags actually consulted
+        by source-level $ifdef chains today are emitted here; add more as
+        needed. }
+        if CPUX86_HAS_MMX in cpu_capabilities[init_settings.cputype] then
+          def_system_macro('CPUX86_HAS_MMX');
+        if CPUX86_HAS_SSEUNIT in cpu_capabilities[init_settings.cputype] then
+          def_system_macro('CPUX86_HAS_SSEUNIT');
+        if CPUX86_HAS_SSE2 in cpu_capabilities[init_settings.cputype] then
+          def_system_macro('CPUX86_HAS_SSE2');
+      {$endif}
+
       def_system_macro('FPC_HAS_ANSICHAR_CHAR');
       { currently, all supported CPUs have an internal sar implementation }
         def_system_macro('FPC_HAS_INTERNAL_SAR');

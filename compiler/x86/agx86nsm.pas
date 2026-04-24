@@ -134,6 +134,7 @@ interface
         '386',      // cpu_386
         '486',      // cpu_486
         'pentium',  // cpu_Pentium
+        'pentium',  // cpu_PentiumMMX (P55C - same instruction set as P5 plus MMX; nasm has no separate level)
         'p2',       // cpu_Pentium2
         'p3',       // cpu_Pentium3
         'p4',       // cpu_Pentium4
@@ -162,6 +163,7 @@ interface
         '386',     // cpu_386
         '486',     // cpu_486
         'pentium', // cpu_Pentium
+        'pentium', // cpu_PentiumMMX (P55C - same instruction set as P5 plus MMX; nasm has no separate level)
         'p2',      // cpu_Pentium2
         'p3',      // cpu_Pentium3
         'p4',      // cpu_Pentium4

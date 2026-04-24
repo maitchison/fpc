@@ -281,11 +281,12 @@ const
         instruction set with plain Pentium; MMX itself is enabled via
         -CfMMX, orthogonal to -Cp. Selecting "Pentium II" here gives
         CMOV and requires a P6-class CPU. }
-      opt_pentium = 'P~e~ntium / Pentium MMX';
-      opt_pentium2 = 'Pentium ~I~I / Pentium Pro';
-      opt_pentium3 = 'Pentium II~I~ (SSE)';
-      opt_pentiumiv = 'Pentium ~4~ (SSE2)';
-      opt_pentiumm = 'Pentium ~M~ (SSE2)';
+      opt_pentium     = 'P~e~ntium (P5)';
+      opt_pentiummmx  = 'Pentium M~M~X (P55C)';
+      opt_pentium2    = 'Pentium ~I~I';
+      opt_pentium3    = 'Pentium II~I~ (SSE)';
+      opt_pentiumiv   = 'Pentium ~4~ (SSE2)';
+      opt_pentiumm    = 'Pentium ~M~ (SSE2)';
       opt_m68000 = 'm~6~8000';
       opt_m68020 = 'm680~2~0';
       { Assembler options }
@@ -1308,6 +1309,8 @@ begin
            st:=opt_i386486;
          if st='PENTIUM' then
            st:=opt_pentium;
+         if st='PENTIUMMMX' then
+           st:=opt_pentiummmx;
          if st='PENTIUM2' then
            st:=opt_pentium2;
          if st='PENTIUM3' then
@@ -1338,6 +1341,8 @@ begin
            st:=opt_i386486;
          if st='PENTIUM' then
            st:=opt_pentium;
+         if st='PENTIUMMMX' then
+           st:=opt_pentiummmx;
          if st='PENTIUM2' then
            st:=opt_pentium2;
          if st='PENTIUM3' then
