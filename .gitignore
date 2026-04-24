@@ -74,6 +74,7 @@ symbol_order*.fpc
 /compiler/msgidx.inc
 /compiler/msgtxt.inc
 /compiler/revision.inc
+/packages/ide/ide_revision.inc
 /compiler/utils/fpc
 /compiler/utils/msg2inc
 /compiler/utils/mka64ins

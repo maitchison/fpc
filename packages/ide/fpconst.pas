@@ -23,7 +23,13 @@ uses Views,App,
      WViews,WEditor,WHTMLHlp;
 
 const
-     VersionStr           = '1.0.14';
+     VersionStr           = '1.0.15';
+
+{$ifdef HAS_REVINC}
+     BuildCommitStr       = '-'+{$i ide_revision.inc};
+{$else}
+     BuildCommitStr       = '';
+{$endif}
 
      MaxRecentFileCount   = 9;
      MaxToolCount         = 16;
