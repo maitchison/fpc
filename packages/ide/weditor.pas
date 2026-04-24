@@ -4373,7 +4373,7 @@ begin
              if X<=length(Format) then
                {Color:=ColorTab[ord(Format[X])] else Color:=ColorTab[coTextColor];
                  this give BoundsCheckError with -Cr quite often PM }
-               Color:=ColorTab[ord(Format[X]) mod (coLastColor + 1)] else Color:=ColorTab[coTextColor];
+               Color:=ColorTab[ord(Format[X]) mod (coLastColor + 1)] else Color:=ColorTab[coWhiteSpaceColor];
 
             if IsFlagSet(efHighlightRow) and
                (PX.Y=CurPos.Y) then
