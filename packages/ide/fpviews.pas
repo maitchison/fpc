@@ -191,6 +191,7 @@ type
       function    InsertNewLine : Sw_integer;virtual;
       function    InsertLine(LineNo: sw_integer; const S: sw_astring): PCustomLine; virtual;
       procedure   AddLine(const S: sw_astring); virtual;
+      procedure   SetState(AState: Word; Enable: Boolean); virtual;
     end;
 
     PSourceWindow = ^TSourceWindow;
@@ -198,14 +199,21 @@ type
       Editor    : PSourceEditor;
       Indicator : PIndicator;
       NoNameCount : longint;
+      Fullscreen  : boolean;
+      SavedFlags  : Byte;
+      function    IsRealFile: boolean;
       constructor Init(var Bounds: TRect; AFileName: string);
+      procedure   Draw; virtual;
       function    GetTitle(MaxSize: sw_Integer): TTitleStr; virtual;
       procedure   SetTitle(ATitle: string); virtual;
       procedure   UpdateTitle; virtual;
       procedure   HandleEvent(var Event: TEvent); virtual;
+      procedure   SetState(AState: Word; Enable: Boolean); virtual;
       procedure   Update; virtual;
       procedure   UpdateCommands; virtual;
       function    GetPalette: PPalette; virtual;
+      procedure   ApplyFullscreenChrome(Enable: Boolean);
+      procedure   RefreshFullscreenStatus;
       constructor Load(var S: TStream);
       procedure   Store(var S: TStream);
       destructor  Done; virtual;
@@ -2573,12 +2581,19 @@ begin
   Abstract;
 end;
 
+function TSourceWindow.IsRealFile: boolean;
+begin
+  IsRealFile := (Editor<>nil) and (Editor^.FileName<>'') and (not Editor^.IsClipboard);
+end;
+
 constructor TSourceWindow.Init(var Bounds: TRect; AFileName: string);
 var HSB,VSB: PScrollBar;
     R: TRect;
     PA : Array[1..2] of pointer;
     LoadFile: boolean;
 begin
+  Fullscreen:=false;
+  SavedFlags:=0;
   inherited Init(Bounds,AFileName,{SearchFreeWindowNo}0);
   AutoNumber:=true;
   Options:=Options or ofTileAble;
@@ -2687,6 +2702,11 @@ begin
           cmSaveAs :
             if Editor^.IsClipboard=false then
               Editor^.SaveAs;
+          cmZoom :
+            if IsRealFile and ((DefaultCodeEditorFlags and efFullscreenSource)<>0) then
+              ApplyFullscreenChrome(not Fullscreen)
+            else
+              DontClear:=true;
         else DontClear:=true;
         end;
         if DontClear=false then ClearEvent(Event);
@@ -2711,9 +2731,128 @@ begin
   Message(Application,evBroadcast,cmCommandSetChanged,nil);
 end;
 
+procedure TSourceWindow.Draw;
+var B: TDrawBuffer;
+    I: Sw_Integer;
+    C: Word;
+begin
+  if Fullscreen then
+    begin
+      C:=GetColor(1);
+      MoveChar(B, ' ', C, Size.X);
+      for I:=0 to Size.Y-1 do
+        WriteLine(0, I, Size.X, 1, B);
+    end;
+  inherited Draw;
+end;
+
+procedure TSourceEditor.SetState(AState: Word; Enable: Boolean);
+var W: PSourceWindow;
+begin
+  inherited SetState(AState, Enable);
+  if Owner<>nil then
+    W:=PSourceWindow(Owner)
+  else
+    W:=nil;
+  if (W<>nil) and W^.Fullscreen then
+    begin
+      if HScrollBar<>nil then HScrollBar^.Hide;
+      if VScrollBar<>nil then VScrollBar^.Hide;
+      if Indicator<>nil then Indicator^.Hide;
+    end;
+end;
+
+procedure TSourceWindow.ApplyFullscreenChrome(Enable: Boolean);
+var R: TRect;
+    V: PView;
+begin
+  if not IsRealFile then exit;
+  if Enable and not Fullscreen then
+    begin
+      GetBounds(ZoomRect);
+      SavedFlags:=Flags;
+      Flags:=Flags and not (wfMove+wfGrow+wfClose+wfZoom);
+      Desktop^.GetExtent(R);
+      Locate(R);
+      V := First;
+      while V <> nil do
+        begin
+          if V <> PView(Editor) then
+            V^.Hide;
+          if V = Last then V := nil else V := V^.Next;
+        end;
+      GetExtent(R);
+      if Editor<>nil then Editor^.Locate(R);
+      Fullscreen:=true;
+    end
+  else if (not Enable) and Fullscreen then
+    begin
+      Flags:=SavedFlags;
+      Locate(ZoomRect);
+      V := First;
+      while V <> nil do
+        begin
+          if V <> PView(Editor) then
+            V^.Show;
+          if V = Last then V := nil else V := V^.Next;
+        end;
+      GetExtent(R); R.Grow(-1,-1);
+      if Editor<>nil then Editor^.Locate(R);
+      Fullscreen:=false;
+    end;
+  if (StatusLine<>nil) then
+    begin
+      if Fullscreen and (GetState(sfSelected)) then
+        RefreshFullscreenStatus
+      else
+        PAdvancedStatusLine(StatusLine)^.ClearStatusText;
+    end;
+  DrawView;
+end;
+
+procedure TSourceWindow.RefreshFullscreenStatus;
+var S, Path: string;
+    W, TotalW: sw_integer;
+    RightLen: sw_integer;
+begin
+  if (StatusLine=nil) or (not Fullscreen) or (Editor=nil) then exit;
+  if (GetState(sfSelected)=false) then exit;
+  if Editor^.FileName='' then exit;
+  Path:=SmartPath(Editor^.FileName);
+  S:=' line '+IntToStr(Editor^.CurPos.Y+1)+' col '+IntToStr(Editor^.CurPos.X+1)+' ';
+  TotalW:=StatusLine^.Size.X;
+  if TotalW < Length(S)+Length(Path)+2 then
+    S:=' '+Path+S
+  else
+    begin
+      RightLen:=Length(S);
+      W:=TotalW - RightLen - 1;
+      if Length(Path) > W then Path:=Copy(Path, Length(Path)-W+1, W);
+      S:=' '+Path+CharStr(' ', TotalW-Length(Path)-RightLen-1)+S;
+    end;
+  PAdvancedStatusLine(StatusLine)^.SetStatusText(S);
+end;
+
+procedure TSourceWindow.SetState(AState: Word; Enable: Boolean);
+begin
+  inherited SetState(AState, Enable);
+  if (AState=sfSelected) and Enable and (not Fullscreen) and IsRealFile and
+     ((DefaultCodeEditorFlags and efFullscreenSource)<>0) and
+     ((DefaultCodeEditorFlags and efMaximizeSource)<>0) then
+    ApplyFullscreenChrome(true);
+  if (AState=sfSelected) and Fullscreen then
+    begin
+      if Enable then
+        RefreshFullscreenStatus
+      else if StatusLine<>nil then
+        PAdvancedStatusLine(StatusLine)^.ClearStatusText;
+    end;
+end;
+
 procedure TSourceWindow.Update;
 begin
   ReDraw;
+  if Fullscreen then RefreshFullscreenStatus;
 end;
 
 
@@ -2725,6 +2864,8 @@ end;
 
 constructor TSourceWindow.Load(var S: TStream);
 begin
+  Fullscreen:=false;
+  SavedFlags:=0;
   Title:=S.ReadStr;
   PushStatus(FormatStrStr(msg_loadingfile,GetStr(Title)));
   inherited Load(S);
@@ -2751,6 +2892,8 @@ end;
 destructor TSourceWindow.Done;
 begin
   PushStatus(FormatStrStr(msg_closingfile,GetStr(Title)));
+  if Fullscreen and (StatusLine<>nil) then
+    PAdvancedStatusLine(StatusLine)^.ClearStatusText;
   if not IDEApp.IsClosing then
     Message(Application,evBroadcast,cmSourceWndClosing,@Self);
   inherited Done;
@@ -3986,6 +4129,13 @@ begin
     Message(Application,evBroadcast,cmUpdate,nil);
     }
     W^.SetCmdState([cmSaveAll],true);
+    if W^.IsRealFile and ((DefaultCodeEditorFlags and efMaximizeSource)<>0) then
+      begin
+        if (DefaultCodeEditorFlags and efFullscreenSource)<>0 then
+          W^.ApplyFullscreenChrome(true)
+        else
+          W^.Zoom;
+      end;
   end;
   PopStatus;
   IOpenEditorWindow:=W;

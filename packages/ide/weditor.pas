@@ -97,6 +97,8 @@ const
       efOverwriteBlocks     = $00040000;
       efShowIndent          = $00080000;
       efEnhWordRightLeft    = $00100000;
+      efFullscreenSource    = $00200000;
+      efMaximizeSource      = $00400000;
       efStoreContent        = $80000000;
 
       attrAsm       = 1;

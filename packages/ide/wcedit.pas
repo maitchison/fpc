@@ -260,7 +260,7 @@ const
      DefaultCodeEditorFlags : longint =
        efBackupFiles+efInsertMode+efAutoIndent+efPersistentBlocks+efOverwriteBlocks+
        {efUseTabCharacters+}efBackSpaceUnindents+efSyntaxHighlight+
-       efExpandAllTabs+efCodeComplete{+efFolds};
+       efExpandAllTabs+efCodeComplete+efFullscreenSource+efMaximizeSource{+efFolds};
      DefaultTabSize     : integer = 8;
      DefaultIndentSize   : integer = 1;
      UseSyntaxHighlight : function(Editor: PFileEditor): boolean = {$ifdef fpc}@{$endif}DefUseSyntaxHighlight;
