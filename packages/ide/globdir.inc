@@ -178,6 +178,13 @@
   {$define VESA}
 {$endif}
 
+{ --- S3 text-mode probing (go32v2 only; piggy-backs on VESA) --- }
+{$ifdef VESA}
+  {$ifdef GO32V2}
+    {$define S3PROBE}
+  {$endif}
+{$endif}
+
 {$ifdef NOWINCLIP}
   {$undef WINCLIPSUPPORTED}
 {$endif}

@@ -130,6 +130,7 @@ function VESAGetMode(var Mode: word): boolean;
 function VESASelectMemoryWindow(Window: byte; Position: word): boolean;
 function VESAReturnMemoryWindow(Window: byte; var Position: word): boolean;
 function RegisterVesaVideoMode(Mode : word) : boolean;
+function RegisterS3VideoMode(ModeByte: byte; Cols, Rows: word; Color: boolean) : boolean;
 function RegisteredVesaVideoModeCount: word;
 Procedure FreeVesaModes;
 
@@ -154,6 +155,9 @@ type
          V            : TVideoMode;
          Mode         : word;
          IsGraphic    : boolean;
+         { true: set via INT 10h AX=00xxh (legacy VGA/S3 text mode byte)
+           false: set via INT 10h AX=4F02h BX=Mode (VBE) }
+         IsS3         : boolean;
          { zero based vesa specific driver count }
          VideoIndex   : word;
          Next         : PVesaVideoMode;
@@ -287,17 +291,37 @@ function RegisterVesaVideoMode(Mode : word) : boolean;
 var B: TVESAModeInfoBlock;
     VH : PVesaVideoMode;
     DoAdd : boolean;
+    NewCol, NewRow : word;
+    NewColor, NewGraphic : boolean;
 begin
   if not VESAGetModeInfo(Mode,B) then
     RegisterVesaVideoMode:=false
   else
     begin
+      NewGraphic:=(B.Attributes and vesa_vma_GraphicsMode)<>0;
+      NewColor:=(B.Attributes and vesa_vma_ColorMode)<>0;
+      if NewGraphic then
+        begin
+          NewCol:=B.XResolution div 8;
+          NewRow:=B.YResolution div 8;
+        end
+      else
+        begin
+          NewCol:=B.XResolution;
+          NewRow:=B.YResolution;
+        end;
       VH:=VesaVideoModeHead;
       DoAdd:=true;
       RegisterVesaVideoMode:=false;
       while assigned(VH) do
         begin
-          if VH^.mode=mode then
+          if (VH^.mode=mode) and (not VH^.IsS3) then
+            DoAdd:=false;
+          { also dedup by geometry: avoid S3-probed entry stealing a
+            VBE-sourced text mode of the same size (or vice-versa). }
+          if (not VH^.IsGraphic) and (not NewGraphic) and
+             (VH^.v.col=NewCol) and (VH^.v.row=NewRow) and
+             (VH^.v.color=NewColor) then
             DoAdd:=false;
           VH:=VH^.next;
         end;
@@ -306,23 +330,50 @@ begin
           New(VH);
           VH^.next:=VesaVideoModeHead;
           VH^.mode:=mode;
-          VH^.IsGraphic:=(B.Attributes and vesa_vma_GraphicsMode)<>0;
-          VH^.v.color:=(B.Attributes and vesa_vma_ColorMode)<>0;
-          if VH^.IsGraphic then
-            begin
-              VH^.v.col:=B.XResolution div 8;
-              VH^.v.row:=B.YResolution div 8;
-            end
-          else
-            begin
-              VH^.v.col:=B.XResolution;
-              VH^.v.row:=B.YResolution;
-            end;
+          VH^.IsS3:=false;
+          VH^.IsGraphic:=NewGraphic;
+          VH^.v.color:=NewColor;
+          VH^.v.col:=NewCol;
+          VH^.v.row:=NewRow;
           VH^.VideoIndex:=VesaRegisteredModes;
           Inc(VesaRegisteredModes);
           RegisterVesaVideoMode:=true;
           VesaVideoModeHead:=VH;
         end;
+    end;
+end;
+
+function RegisterS3VideoMode(ModeByte: byte; Cols, Rows: word; Color: boolean) : boolean;
+var VH : PVesaVideoMode;
+    DoAdd : boolean;
+begin
+  VH:=VesaVideoModeHead;
+  DoAdd:=true;
+  RegisterS3VideoMode:=false;
+  while assigned(VH) do
+    begin
+      { dedup by geometry against both VBE-sourced text modes and
+        prior S3 registrations. }
+      if (not VH^.IsGraphic) and
+         (VH^.v.col=Cols) and (VH^.v.row=Rows) and
+         (VH^.v.color=Color) then
+        DoAdd:=false;
+      VH:=VH^.next;
+    end;
+  if DoAdd then
+    begin
+      New(VH);
+      VH^.next:=VesaVideoModeHead;
+      VH^.mode:=ModeByte;
+      VH^.IsS3:=true;
+      VH^.IsGraphic:=false;
+      VH^.v.color:=Color;
+      VH^.v.col:=Cols;
+      VH^.v.row:=Rows;
+      VH^.VideoIndex:=VesaRegisteredModes;
+      Inc(VesaRegisteredModes);
+      RegisterS3VideoMode:=true;
+      VesaVideoModeHead:=VH;
     end;
 end;
 
@@ -336,6 +387,19 @@ begin
   dos.intr($10,r);
   OK:=(r.ax=$004f);
   VESASetMode:=OK;
+end;
+
+{ Set a legacy VGA/S3 text mode via INT 10h AX=00xxh.
+  Verify by reading back the current mode byte (AH=0Fh, returns AL=mode,
+  bit 7 cleared); if it matches we consider the set successful. }
+function S3SetTextMode(ModeByte: byte): boolean;
+var r: registers;
+begin
+  r.ah:=$00; r.al:=ModeByte;
+  dos.intr($10,r);
+  r.ah:=$0f;
+  dos.intr($10,r);
+  S3SetTextMode:=((r.al and $7f) = (ModeByte and $7f));
 end;
 
 function VESAGetMode(var Mode: word): boolean;
@@ -456,7 +520,10 @@ function SetVESAMode(const VideoMode: TVideoMode): Boolean;
                end
              else
 {$endif TESTGRAPHIC}
-               res:=VESASetMode(VH^.mode);
+               if VH^.IsS3 then
+                 res:=S3SetTextMode(byte(VH^.mode))
+               else
+                 res:=VESASetMode(VH^.mode);
              if res then
                begin
                   ScreenWidth:=VideoMode.Col;

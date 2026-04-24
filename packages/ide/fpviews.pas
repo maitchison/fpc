@@ -574,6 +574,7 @@ uses
    fpintf, { supersedes version_string of version unit }
 {$endif USE_EXTERNAL_COMPILER}
   {$ifdef VESA}Vesa,{$endif}
+  {$ifdef S3PROBE}S3Modes,{$endif}
   FPSymbol,FPDebug,FPVars,FPUtils,FPCompil,FPHelp,
   FPTools,FPIDE,FPCodTmp,FPCodCmp;
 
@@ -5159,6 +5160,12 @@ begin
 {$endif DEBUG}
           RegisterVesaVideoMode(ML.Modes[I]);
     end;
+{$ifdef S3PROBE}
+  { After VBE enumeration, probe for S3-specific wide text modes that
+    many S3 Virge / Trio BIOSes do not expose via AX=4F00h. No-op on
+    non-S3 cards (detected via VBE OEM string). }
+  S3DetectAndProbe;
+{$endif}
 end;
 
 procedure DoneVESAScreenModes;
