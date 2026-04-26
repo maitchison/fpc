@@ -2489,6 +2489,22 @@ var
 
         Result:=continueloadppu;
 
+        { Reopen the parent's ppufile. We tempclosed it above (under
+          SHORT_ON_FILE_HANDLES); the matching tempopen normally happens
+          inside post_load_or_compile, but that is only reached when
+          continueloadppu finishes with state=ms_compiled. The ctask
+          scheduler can leave a load deferred (state=ms_load) when there
+          is a dependency cycle, in which case continueloadppu early-exits
+          without reopening the parent and a subsequent read on the parent
+          ppufile crashes (f is nil). tempopen is a no-op when the file
+          is not tempclosed, so calling it here is also safe in the
+          success path. }
+{$ifdef SHORT_ON_FILE_HANDLES}
+        if from_module.is_unit and
+            assigned(tppumodule(from_module).ppufile) then
+          tppumodule(from_module).ppufile.tempopen;
+{$endif SHORT_ON_FILE_HANDLES}
+
         set_current_module(from_module);
       end;
 
