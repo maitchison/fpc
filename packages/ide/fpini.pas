@@ -41,7 +41,7 @@ uses
 {$endif USE_EXTERNAL_COMPILER}
   WConsts,WUtils,WINI,WViews,WEditor,WCEdit,FPSymbol,
   {$ifndef NODEBUG}FPDebug,{$endif}FPConst,FPVars,
-  FPIntf,FPTools,FPSwitch,fpchash;
+  FPIntf,FPTools,FPSwitch,fpchash,FPFindF;
 
 const
   PrinterDevice : string = 'prn';
@@ -138,6 +138,10 @@ const
   ieAltClickAction   = 'AltClickAction';
   ieCtrlClickAction  = 'CtrlClickAction';
   ieFindFlags        = 'FindFlags';
+  ieFindInFilesFlags     = 'FindInFilesFlags';
+  ieFindInFilesInclude   = 'FindInFilesInclude';
+  ieFindInFilesExclude   = 'FindInFilesExclude';
+  ieFindInFilesSearchStr = 'FindInFilesSearchStr';
   ieToolName         = 'Title';
   ieToolProgram      = 'Program';
   ieToolParams       = 'Params';
@@ -517,6 +521,10 @@ begin
   end;
   { Search }
   FindFlags:=INIFile^.GetIntEntry(secSearch,ieFindFlags,FindFlags);
+  FindInFilesRec.Flags      :=INIFile^.GetIntEntry(secSearch,ieFindInFilesFlags,FindInFilesRec.Flags);
+  FindInFilesRec.IncludeMask:=INIFile^.GetEntry(secSearch,ieFindInFilesInclude,FindInFilesRec.IncludeMask);
+  FindInFilesRec.ExcludeMask:=INIFile^.GetEntry(secSearch,ieFindInFilesExclude,FindInFilesRec.ExcludeMask);
+  FindInFilesRec.SearchStr  :=INIFile^.GetEntry(secSearch,ieFindInFilesSearchStr,FindInFilesRec.SearchStr);
   { Breakpoints }
 {$ifndef NODEBUG}
   BreakpointCount:=INIFile^.GetIntEntry(secBreakpoint,ieBreakpointCount,0);
@@ -741,6 +749,10 @@ begin
     INIFile^.SetEntry(secKeyboard,ieEditKeys,'borland');
   { Search }
   INIFile^.SetIntEntry(secSearch,ieFindFlags,FindFlags);
+  INIFile^.SetIntEntry(secSearch,ieFindInFilesFlags,FindInFilesRec.Flags);
+  INIFile^.SetEntry(secSearch,ieFindInFilesInclude,EscapeIniText(FindInFilesRec.IncludeMask));
+  INIFile^.SetEntry(secSearch,ieFindInFilesExclude,EscapeIniText(FindInFilesRec.ExcludeMask));
+  INIFile^.SetEntry(secSearch,ieFindInFilesSearchStr,EscapeIniText(FindInFilesRec.SearchStr));
   { Breakpoints }
 {$ifndef NODEBUG}
   BreakPointCount:=BreakpointsCollection^.Count;
