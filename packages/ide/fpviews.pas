@@ -577,7 +577,7 @@ uses
   {$ifdef S3PROBE}S3Modes,{$endif}
   FPSymbol,FPDebug,FPVars,FPUtils,FPCompil,FPHelp,
   FPTools,FPIDE,FPCodTmp,FPCodCmp,
-  FPDefIdx,FPNavStk;
+  FPDefIdx,FPNavStk,FPPeek;
 
 const
   RSourceEditor: TStreamRec = (
@@ -2301,6 +2301,8 @@ begin
         case Event.KeyCode of
           kbCtrlEnter :
             Message(@Self,evCommand,cmGotoDefinition,nil);
+          kbShiftTab :
+            Message(@Self,evCommand,cmPeekDefinition,nil);
           kbAltLeft :
             Message(@Self,evCommand,cmNavBack,nil);
           kbAltRight :
@@ -2381,6 +2383,45 @@ begin
             NavStackBack(FileName, CurPos.X, CurPos.Y);
           cmNavForward :
             NavStackForward(FileName, CurPos.X, CurPos.Y);
+          cmPeekDefinition :
+            begin
+              S:=GetEditorCurWord(@Self,[]);
+              if S='' then
+                FlashEditorStatus('Peek definition: no identifier at cursor')
+              else if not DefIndexAvailable then
+                FlashEditorStatus(
+                  'Peek definition: no browser info ('+S+
+                  ') -- enable Options|Compiler|Browser and recompile')
+              else
+                begin
+                  Matches:=DefIndexResolve(S);
+                  if (Matches<>nil) and (Matches^.Count>0) then
+                    begin
+                      Match:=Matches^.At(0);
+                      if ShowPeek(Match^.FileName^,
+                                  Match^.Line, Match^.Col,
+                                  Match^.Stale) then
+                        begin
+                          { User pressed Enter -- promote to a real jump,
+                            same path as Ctrl+Enter. }
+                          NavStackPush(FileName, CurPos.X, CurPos.Y);
+                          TargetW:=TryToOpenFile(nil, Match^.FileName^,
+                                                 Match^.Col-1, Match^.Line-1, true);
+                          if Assigned(TargetW) then TargetW^.Select;
+                        end;
+                      if Matches^.Count>1 then
+                        FlashEditorStatus(
+                          S+': '+IntToStr(Matches^.Count)+
+                          ' matches; previewed first');
+                      Dispose(Matches, Done);
+                    end
+                  else
+                    begin
+                      if Matches<>nil then Dispose(Matches, Done);
+                      FlashEditorStatus('Peek definition: symbol not found: '+S);
+                    end;
+                end;
+            end;
           cmEditorOptions :
             Message(Application,evCommand,cmEditorOptions,@Self);
           cmHelp :
