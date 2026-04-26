@@ -2277,7 +2277,7 @@ var
   msg: string;
 begin
   if (ScreenWidth<=0) or (ScreenHeight<=0) or (VideoBuf=nil) then exit;
-  attr:=$1F shl 8;  { white on blue, like the standard status line }
+  attr:=$8F shl 8;  { bright white on dark gray }
   msg:=' '+S;
   if length(msg)>ScreenWidth then msg:=Copy(msg,1,ScreenWidth);
   while length(msg)<ScreenWidth do msg:=msg+' ';
