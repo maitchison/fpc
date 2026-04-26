@@ -194,7 +194,7 @@ uses
   Video,Mouse,Keyboard,
   Compiler,Version,
   FVConsts,
-  Dos{,Memory},Menus,Dialogs,StdDlg,timeddlg,
+  Dos{,Memory},Menus,Dialogs,StdDlg,timeddlg,HistList,
 {$Ifdef COLORSEL}
   ColorSel,
 {$endif}
@@ -494,9 +494,10 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 dialog_openafile        = 'Open a file';
                 dialog_openbyname       = 'Open file by name';
                 label_openbyname_filter = '~F~ile:';
+                label_openbyname_mask   = '~M~ask:';
                 label_openbyname_counts = '%d of %d';
                 label_openbyname_nomatches = '(no matches)';
-                label_openbyname_empty  = '(no .pas/.inc files in search path)';
+                label_openbyname_empty  = '(no files match mask in search path)';
                 dialog_browsesymbol = 'Browse Symbol';
 
                 msg_confirmsourcediradd = 'Directory %s is not in search path for source files. '+

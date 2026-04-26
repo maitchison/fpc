@@ -143,6 +143,7 @@ const
   ieFindInFilesInclude   = 'FindInFilesInclude';
   ieFindInFilesExclude   = 'FindInFilesExclude';
   ieFindInFilesSearchStr = 'FindInFilesSearchStr';
+  ieQuickOpenInclude     = 'QuickOpenInclude';
   ieToolName         = 'Title';
   ieToolProgram      = 'Program';
   ieToolParams       = 'Params';
@@ -530,6 +531,7 @@ begin
   FindInFilesRec.IncludeMask:=INIFile^.GetEntry(secSearch,ieFindInFilesInclude,FindInFilesRec.IncludeMask);
   FindInFilesRec.ExcludeMask:=INIFile^.GetEntry(secSearch,ieFindInFilesExclude,FindInFilesRec.ExcludeMask);
   FindInFilesRec.SearchStr  :=INIFile^.GetEntry(secSearch,ieFindInFilesSearchStr,FindInFilesRec.SearchStr);
+  QuickOpenRec.IncludeMask  :=INIFile^.GetEntry(secSearch,ieQuickOpenInclude,QuickOpenRec.IncludeMask);
   { Breakpoints }
 {$ifndef NODEBUG}
   BreakpointCount:=INIFile^.GetIntEntry(secBreakpoint,ieBreakpointCount,0);
@@ -775,6 +777,7 @@ begin
   INIFile^.SetEntry(secSearch,ieFindInFilesInclude,EscapeIniText(FindInFilesRec.IncludeMask));
   INIFile^.SetEntry(secSearch,ieFindInFilesExclude,EscapeIniText(FindInFilesRec.ExcludeMask));
   INIFile^.SetEntry(secSearch,ieFindInFilesSearchStr,EscapeIniText(FindInFilesRec.SearchStr));
+  INIFile^.SetEntry(secSearch,ieQuickOpenInclude,EscapeIniText(QuickOpenRec.IncludeMask));
   { Breakpoints }
 {$ifndef NODEBUG}
   BreakPointCount:=BreakpointsCollection^.Count;

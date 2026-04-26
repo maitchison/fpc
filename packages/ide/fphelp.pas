@@ -107,7 +107,7 @@ const
       hint_filenew           = 'Create a new file in a new edit window';
       hint_filenewfromtemplate='Create a new file using a code template';
       hint_fileopen          = 'Locate and open a file in an edit window';
-      hint_fileopenbyname    = 'Quick-open a .pas/.inc file by typing part of its name';
+      hint_fileopenbyname    = 'Quick-open a file by typing part of its name (file types set by the Mask field)';
       hint_filesave          = 'Save the file in the active edit window';
       hint_filesaveas        = 'Save the current file under a different name, directory or drive';
       hint_filesaveall       = 'Save all modified files';
