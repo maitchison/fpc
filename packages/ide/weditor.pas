@@ -842,6 +842,11 @@ const
 
 procedure RegisterWEditor;
 
+{ True when the focused code editor is mid-WordStar-prefix (Ctrl-K / Ctrl-Q /
+  Ctrl-O), so the menu bar's preprocess hot-key lookup can step aside and let
+  the next keystroke reach the editor for the second half of the chord. }
+function EditorPrefixKeyActive: Boolean;
+
 implementation
 
 uses
@@ -3776,6 +3781,19 @@ begin
   DrawView;
 end;
 
+{ Mirrors the focused editor's KeyState (ConvertEvent updates it on every
+  evKeyDown). Read by TAdvancedMenuBar.HandleEvent so the menu bar can step
+  out of the way while a WordStar prefix is pending. Single-editor scope is
+  fine: only one view holds focus, and ConvertEvent rewrites this on every
+  keystroke that reaches a code editor. }
+var
+  GlobalEditorPrefixKeyState: Integer = 0;
+
+function EditorPrefixKeyActive: Boolean;
+begin
+  EditorPrefixKeyActive := GlobalEditorPrefixKeyState <> 0;
+end;
+
 procedure TCustomCodeEditor.ConvertEvent(var Event: TEvent);
 var
   Key: Word;
@@ -3806,6 +3824,7 @@ begin
           Event.What := evCommand;
           Event.Command := Key;
         end;
+    GlobalEditorPrefixKeyState := KeyState;
   end;
 end;
 
