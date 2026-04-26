@@ -92,6 +92,8 @@ const
      FilterCaptureName    = '_filter_.out';
      FPOutFileName        = 'fp___.out';
      FPErrFileName        = 'fp___.err';
+     FPDosShellBatName    = 'fp___sh.bat';
+     FPDosShellEnvVar     = 'FPISDOSSHELL';
      GDBOutFileName       = 'gdb___.out';
      GDBOutPutFileName    = 'gdb___.txt';
      GDBPrompt            = 'gdb>';
