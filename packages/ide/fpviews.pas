@@ -137,6 +137,8 @@ const cMaxNestnessChanges = 20;
 type
     TNestnessPoints = array[0..cMaxNestnessChanges-1] of record X,Y:sw_integer;NC:boolean; end;
 
+    TSourceSyntaxType = (stPascal, stIni, stAsm);
+
     PSourceEditor = ^TSourceEditor;
     TSourceEditor = object(TFileEditor)
       CompileStamp : longint;
@@ -147,6 +149,7 @@ type
       FixedNestedComments : TPoint;
       NestnessPoints:TNestnessPoints;
       NestPos : sw_integer;
+      SyntaxType: TSourceSyntaxType;
       constructor Init(var Bounds: TRect; AHScrollBar, AVScrollBar:
           PScrollBar; AIndicator: PIndicator;const AFileName: string);
 {$ifndef NODEBUG}
@@ -157,6 +160,8 @@ type
       { Syntax highlight }
       function  IsReservedWord(const S: string): boolean; virtual;
       function  IsAsmReservedWord(const S: string): boolean; virtual;
+      function  HashIsSymbol: boolean; virtual;
+      function  ClassifyAsmToken(const W: string; LeadCh: AnsiChar): byte; virtual;
       function  GetSpecSymbolCount(SpecClass: TSpecSymbolClass): integer; virtual;
       function  GetSpecSymbol(SpecClass: TSpecSymbolClass; Index: integer): pstring; virtual;
       function    ParseSourceNestedComments(X,Y : sw_integer): boolean; virtual;
@@ -1278,6 +1283,18 @@ begin
   SearchCoreForFileName:=EC;
 end;
 
+function DetectSyntaxType(const FN: string): TSourceSyntaxType;
+var D: DirStr; N: NameStr; E: ExtStr;
+    UE: string;
+begin
+  DetectSyntaxType:=stPascal;
+  if FN='' then exit;
+  FSplit(FN,D,N,E);
+  UE:=UpcaseStr(E);
+  if UE='.INI' then DetectSyntaxType:=stIni
+  else if (UE='.S') or (UE='.ASM') then DetectSyntaxType:=stAsm;
+end;
+
 constructor TSourceEditor.Init(var Bounds: TRect; AHScrollBar, AVScrollBar:
           PScrollBar; AIndicator: PIndicator;const AFileName: string);
 var EC: PCodeEditorCore;
@@ -1288,6 +1305,7 @@ begin
   CompileStamp:=0;
   FixedNestedComments.Y:=2000001;
   NestedComments:=false;
+  SyntaxType:=DetectSyntaxType(FileName);
 end;
 
 Const
@@ -1324,64 +1342,240 @@ Const
   FreePascalAsmPrefix : string[3] = 'ASM';
   FreePascalAsmSuffix : string[3] = 'END';
 
+  { INI: ';' and '#' start single-line comments; "..." for strings.
+    No multi-line strings, no asm/directive prefixes. }
+  IniSpecSymbolCount : array [TSpecSymbolClass] of integer =
+  (
+    2,{ssCommentPrefix    : ';' '#' }
+    2,{ssCommentSingleLinePrefix}
+    0,{ssCommentSuffix    : single-line, no closer needed}
+    1,{ssStringPrefix     : '"'}
+    1,{ssStringSuffix     : '"'}
+    0,{ssStringMultiLinePrefix}
+    0,{ssStringMultiLineSuffix}
+    0,{ssDirectivePrefix}
+    0,{ssAsmPrefix}
+    0 {ssAsmSuffix}
+  );
+  IniCommentPrefix1 : string[1] = ';';
+  IniCommentPrefix2 : string[1] = '#';
+  IniStringPrefix   : string[1] = '"';
+  IniStringSuffix   : string[1] = '"';
+
+  { ASM (Intel-style and AT&T-style mixed): ';', '#', '//' single-line
+    comments and '/* */' block comments; "..." and '...' for strings.
+    Reserved-word lookup is delegated to IsFPAsmReservedWord so mnemonics
+    show up as keywords. }
+  AsmSpecSymbolCount : array [TSpecSymbolClass] of integer =
+  (
+    4,{ssCommentPrefix         : ';' '#' '//' '/*' }
+    3,{ssCommentSingleLinePrefix: ';' '#' '//' }
+    1,{ssCommentSuffix         : '*/' }
+    1,{ssStringPrefix}
+    1,{ssStringSuffix}
+    0,{ssStringMultiLinePrefix}
+    0,{ssStringMultiLineSuffix}
+    0,{ssDirectivePrefix}
+    0,{ssAsmPrefix}
+    0 {ssAsmSuffix}
+  );
+  AsmCommentPrefix1 : string[1] = ';';
+  AsmCommentPrefix2 : string[1] = '#';
+  AsmCommentPrefix3 : string[2] = '//';
+  AsmCommentPrefix4 : string[2] = '/*';
+  AsmCommentSuffix1 : string[2] = '*/';
+  AsmStringPrefix   : string[1] = '"';
+  AsmStringSuffix   : string[1] = '"';
+
 function TSourceEditor.GetSpecSymbolCount(SpecClass: TSpecSymbolClass): integer;
 begin
-  GetSpecSymbolCount:=FreePascalSpecSymbolCount[SpecClass];
+  case SyntaxType of
+    stIni : GetSpecSymbolCount:=IniSpecSymbolCount[SpecClass];
+    stAsm : GetSpecSymbolCount:=AsmSpecSymbolCount[SpecClass];
+  else
+    GetSpecSymbolCount:=FreePascalSpecSymbolCount[SpecClass];
+  end;
 end;
 
 function TSourceEditor.GetSpecSymbol(SpecClass: TSpecSymbolClass; Index: integer): pstring;
 begin
   GetSpecSymbol:=@FreePascalEmptyString;
-  case SpecClass of
-    ssCommentPrefix :
-      case Index of
-        0 : GetSpecSymbol:=@FreePascalCommentPrefix1;
-        1 : GetSpecSymbol:=@FreePascalCommentPrefix2;
-        2 : GetSpecSymbol:=@FreePascalCommentPrefix3;
+  case SyntaxType of
+    stIni :
+      case SpecClass of
+        ssCommentPrefix, ssCommentSingleLinePrefix :
+          case Index of
+            0 : GetSpecSymbol:=@IniCommentPrefix1;
+            1 : GetSpecSymbol:=@IniCommentPrefix2;
+          end;
+        ssStringPrefix : GetSpecSymbol:=@IniStringPrefix;
+        ssStringSuffix : GetSpecSymbol:=@IniStringSuffix;
       end;
-    ssCommentSingleLinePrefix :
-      case Index of
-        0 : GetSpecSymbol:=@FreePascalCommentSingleLinePrefix;
+    stAsm :
+      case SpecClass of
+        ssCommentPrefix :
+          case Index of
+            0 : GetSpecSymbol:=@AsmCommentPrefix1;
+            1 : GetSpecSymbol:=@AsmCommentPrefix2;
+            2 : GetSpecSymbol:=@AsmCommentPrefix3;
+            3 : GetSpecSymbol:=@AsmCommentPrefix4;
+          end;
+        ssCommentSingleLinePrefix :
+          case Index of
+            0 : GetSpecSymbol:=@AsmCommentPrefix1;
+            1 : GetSpecSymbol:=@AsmCommentPrefix2;
+            2 : GetSpecSymbol:=@AsmCommentPrefix3;
+          end;
+        ssCommentSuffix :
+          case Index of
+            0 : GetSpecSymbol:=@AsmCommentSuffix1;
+          end;
+        ssStringPrefix : GetSpecSymbol:=@AsmStringPrefix;
+        ssStringSuffix : GetSpecSymbol:=@AsmStringSuffix;
       end;
-    ssCommentSuffix :
-      case Index of
-        0 : GetSpecSymbol:=@FreePascalCommentSuffix1;
-        1 : GetSpecSymbol:=@FreePascalCommentSuffix2;
-      end;
-    ssStringPrefix :
-      GetSpecSymbol:=@FreePascalStringPrefix;
-    ssStringSuffix :
-      GetSpecSymbol:=@FreePascalStringSuffix;
-    ssStringMultiLinePrefix :
-      GetSpecSymbol:=@FreePascalStringMultiLinePrefix;
-    ssStringMultiLineSuffix :
-      GetSpecSymbol:=@FreePascalStringMultiLineSuffix;
-    { must be uppercased to avoid calling UpCaseStr in MatchesAnyAsmSymbol PM }
-    ssAsmPrefix :
-      GetSpecSymbol:=@FreePascalAsmPrefix;
-    ssAsmSuffix :
-      GetSpecSymbol:=@FreePascalAsmSuffix;
-    ssDirectivePrefix :
-      case Index of
-        0 : GetSpecSymbol:=@FreePascalDirectivePrefix1;
-        1 : GetSpecSymbol:=@FreePascalDirectivePrefix2;
-      end;
-    {ssDirectiveSuffix :
-      case Index of
-        0 : GetSpecSymbol:=@FreePascalDirectiveSuffix1;
-        1 : GetSpecSymbol:=@FreePascalDirectiveSuffix2;
-      end;}
+  else
+    case SpecClass of
+      ssCommentPrefix :
+        case Index of
+          0 : GetSpecSymbol:=@FreePascalCommentPrefix1;
+          1 : GetSpecSymbol:=@FreePascalCommentPrefix2;
+          2 : GetSpecSymbol:=@FreePascalCommentPrefix3;
+        end;
+      ssCommentSingleLinePrefix :
+        case Index of
+          0 : GetSpecSymbol:=@FreePascalCommentSingleLinePrefix;
+        end;
+      ssCommentSuffix :
+        case Index of
+          0 : GetSpecSymbol:=@FreePascalCommentSuffix1;
+          1 : GetSpecSymbol:=@FreePascalCommentSuffix2;
+        end;
+      ssStringPrefix :
+        GetSpecSymbol:=@FreePascalStringPrefix;
+      ssStringSuffix :
+        GetSpecSymbol:=@FreePascalStringSuffix;
+      ssStringMultiLinePrefix :
+        GetSpecSymbol:=@FreePascalStringMultiLinePrefix;
+      ssStringMultiLineSuffix :
+        GetSpecSymbol:=@FreePascalStringMultiLineSuffix;
+      { must be uppercased to avoid calling UpCaseStr in MatchesAnyAsmSymbol PM }
+      ssAsmPrefix :
+        GetSpecSymbol:=@FreePascalAsmPrefix;
+      ssAsmSuffix :
+        GetSpecSymbol:=@FreePascalAsmSuffix;
+      ssDirectivePrefix :
+        case Index of
+          0 : GetSpecSymbol:=@FreePascalDirectivePrefix1;
+          1 : GetSpecSymbol:=@FreePascalDirectivePrefix2;
+        end;
+      {ssDirectiveSuffix :
+        case Index of
+          0 : GetSpecSymbol:=@FreePascalDirectiveSuffix1;
+          1 : GetSpecSymbol:=@FreePascalDirectiveSuffix2;
+        end;}
+    end;
   end;
 end;
 
 function TSourceEditor.IsReservedWord(const S: string): boolean;
 begin
-  IsReservedWord:=IsFPReservedWord(S);
+  case SyntaxType of
+    stIni : IsReservedWord:=false;
+    stAsm : IsReservedWord:=IsFPAsmReservedWord(S);
+  else
+    IsReservedWord:=IsFPReservedWord(S);
+  end;
 end;
 
 function TSourceEditor.IsAsmReservedWord(const S: string): boolean;
 begin
-  IsAsmReservedWord:=IsFPAsmReservedWord(S);
+  case SyntaxType of
+    stIni, stAsm : IsAsmReservedWord:=false;
+  else
+    IsAsmReservedWord:=IsFPAsmReservedWord(S);
+  end;
+end;
+
+function TSourceEditor.HashIsSymbol: boolean;
+begin
+  HashIsSymbol:=SyntaxType in [stIni, stAsm];
+end;
+
+const
+  X86Registers : array[0..150] of string[6] = (
+    { GP8 }
+    'AH','AL','BH','BL','CH','CL','DH','DL',
+    'BPL','DIL','SIL','SPL',
+    'R8B','R9B','R10B','R11B','R12B','R13B','R14B','R15B',
+    { GP16 }
+    'AX','BP','BX','CX','DI','DX','SI','SP',
+    'R8W','R9W','R10W','R11W','R12W','R13W','R14W','R15W',
+    { GP32 }
+    'EAX','EBP','EBX','ECX','EDI','EDX','EFLAGS','EIP','ESI','ESP',
+    'R8D','R9D','R10D','R11D','R12D','R13D','R14D','R15D',
+    { GP64 }
+    'RAX','RBP','RBX','RCX','RDI','RDX','RFLAGS','RIP','RSI','RSP',
+    'R8','R9','R10','R11','R12','R13','R14','R15',
+    { Segment }
+    'CS','DS','ES','FS','GS','SS',
+    { x87 }
+    'ST','ST0','ST1','ST2','ST3','ST4','ST5','ST6','ST7',
+    { MMX }
+    'MM0','MM1','MM2','MM3','MM4','MM5','MM6','MM7',
+    { SSE }
+    'XMM0','XMM1','XMM2','XMM3','XMM4','XMM5','XMM6','XMM7',
+    'XMM8','XMM9','XMM10','XMM11','XMM12','XMM13','XMM14','XMM15',
+    { AVX }
+    'YMM0','YMM1','YMM2','YMM3','YMM4','YMM5','YMM6','YMM7',
+    'YMM8','YMM9','YMM10','YMM11','YMM12','YMM13','YMM14','YMM15',
+    { Control / Debug }
+    'CR0','CR1','CR2','CR3','CR4','CR5','CR6','CR7',
+    'CR8','CR9','CR10','CR11','CR12','CR13','CR14','CR15',
+    'DR0','DR1','DR2','DR3','DR4','DR5','DR6','DR7'
+  );
+
+  { GAS / AT&T directives that mark section / linker visibility -- bright. }
+  AsmBrightDirectives : array[0..10] of string[8] = (
+    '.SECTION','.TEXT','.DATA','.BSS','.RODATA',
+    '.GLOBAL','.GLOBL','.EXTERN','.WEAK','.HIDDEN','.PROTECTED'
+  );
+
+function IsX86Register(const S: string): boolean;
+var US: string; I: integer;
+begin
+  IsX86Register:=false;
+  if (length(S)<2) or (length(S)>6) then exit;
+  US:=UpcaseStr(S);
+  for I:=Low(X86Registers) to High(X86Registers) do
+    if US=X86Registers[I] then begin IsX86Register:=true; exit; end;
+end;
+
+function IsAsmBrightDirective(const S: string): boolean;
+var US: string; I: integer;
+begin
+  IsAsmBrightDirective:=false;
+  if (length(S)<2) or (length(S)>8) then exit;
+  US:=UpcaseStr(S);
+  for I:=Low(AsmBrightDirectives) to High(AsmBrightDirectives) do
+    if US=AsmBrightDirectives[I] then
+      begin IsAsmBrightDirective:=true; exit; end;
+end;
+
+function TSourceEditor.ClassifyAsmToken(const W: string; LeadCh: AnsiChar): byte;
+var DotW: string;
+begin
+  ClassifyAsmToken:=0;
+  if SyntaxType<>stAsm then exit;
+  if LeadCh='.' then
+    begin
+      DotW:='.'+W;
+      if IsAsmBrightDirective(DotW) then
+        ClassifyAsmToken:=3
+      else
+        ClassifyAsmToken:=2;
+    end
+  else if IsX86Register(W) then
+    ClassifyAsmToken:=1;
 end;
 
 const cModeNestedComments : array [TCompilerMode] of boolean =
@@ -2320,6 +2514,16 @@ begin
             begin
               InsertText(FloatToStr(CalcClipboard,0));
               ClearEvent(Event);
+            end;
+          cmFileNameChanged :
+            if (Event.InfoPtr=nil) or (Event.InfoPtr=@Self) then
+            begin
+              if SyntaxType<>DetectSyntaxType(FileName) then
+              begin
+                SyntaxType:=DetectSyntaxType(FileName);
+                if IsFlagSet(efSyntaxHighlight) then
+                  UpdateAttrs(0,attrAll);
+              end;
             end;
       end;
     evCommand :
