@@ -41,7 +41,7 @@ uses
 {$endif USE_EXTERNAL_COMPILER}
   WConsts,WUtils,WINI,WViews,WEditor,WCEdit,FPSymbol,
   {$ifndef NODEBUG}FPDebug,{$endif}FPConst,FPVars,
-  FPIntf,FPTools,FPSwitch,fpchash,FPFindF;
+  FPIntf,FPTools,FPRnPro,FPSwitch,fpchash,FPFindF;
 
 const
   PrinterDevice : string = 'prn';
@@ -92,6 +92,7 @@ const
   secMouse       = 'Mouse';
   secSearch      = 'Search';
   secTools       = 'Tools';
+  secRunProfiles = 'RunProfiles';
   secSourcePath  = 'SourcePath';
   secPreferences = 'Preferences';
   secMisc        = 'Misc';
@@ -146,6 +147,10 @@ const
   ieToolProgram      = 'Program';
   ieToolParams       = 'Params';
   ieToolHotKey       = 'HotKey';
+  ieRunProfileName   = 'Name';
+  ieRunProfileMain   = 'Main';
+  ieRunProfileParams = 'Params';
+  ieActiveRunProfile = 'Active';
   ieBreakpointTyp    = 'Type';
   ieBreakpointCount  = 'Count';
   ieBreakpointState  = 'State';
@@ -545,6 +550,23 @@ begin
       W:=Max(0,Min(65535,INIFile^.GetIntEntry(secTools,ieToolHotKey+S,0)));
       AddTool(S1,S2,S3,W);
     end;
+  { Run profiles }
+  for I:=1 to MaxRunProfileCount do
+    begin
+      S:=IntToStr(I);
+      S1:=INIFile^.GetEntry(secRunProfiles,ieRunProfileName+S,'');
+      if S1='' then Break;
+      S2:=INIFile^.GetEntry(secRunProfiles,ieRunProfileMain+S,'');
+      S3:=INIFile^.GetEntry(secRunProfiles,ieRunProfileParams+S,'');
+      AddRunProfile(S1,S2,S3);
+    end;
+  { Active profile (1-based in INI; 0 = none). Apply it AFTER reading
+    PrimaryFile + RunParameters above so it wins over those values. }
+  I:=INIFile^.GetIntEntry(secRunProfiles,ieActiveRunProfile,0);
+  if (I>=1) and (I<=GetRunProfileCount) then
+    ApplyRunProfile(I-1)
+  else
+    ActiveRunProfile:=-1;
   { Colors }
   S:=AppPalette;
   PS:=StrToPalette(INIFile^.GetEntry(secColors,iePalette+'_1_40',PaletteToStr(copy(S,1,40))));
@@ -778,6 +800,23 @@ begin
       INIFile^.SetEntry(secTools,ieToolParams+S,S3);
       INIFile^.SetIntEntry(secTools,ieToolHotKey+S,W);
     end;
+  { Run profiles }
+  INIFile^.DeleteSection(secRunProfiles);
+  for I:=1 to GetRunProfileCount do
+    begin
+      S:=IntToStr(I);
+      GetRunProfileParams(I-1,S1,S2,S3);
+      if S1<>'' then S1:=EscapeIniText(S1);
+      if S2<>'' then S2:=EscapeIniText(S2);
+      if S3<>'' then S3:=EscapeIniText(S3);
+      INIFile^.SetEntry(secRunProfiles,ieRunProfileName+S,S1);
+      INIFile^.SetEntry(secRunProfiles,ieRunProfileMain+S,S2);
+      INIFile^.SetEntry(secRunProfiles,ieRunProfileParams+S,S3);
+    end;
+  if (ActiveRunProfile>=0) and (ActiveRunProfile<GetRunProfileCount) then
+    INIFile^.SetIntEntry(secRunProfiles,ieActiveRunProfile,ActiveRunProfile+1)
+  else
+    INIFile^.SetIntEntry(secRunProfiles,ieActiveRunProfile,0);
   { Colors }
   if AppPalette<>CIDEAppColor then
   begin

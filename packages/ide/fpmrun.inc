@@ -388,6 +388,36 @@ begin
   Dispose(D, Done);
 end;
 
+procedure TIDEApp.DoManageRunProfiles;
+var R: word;
+begin
+  R:=Application^.ExecuteDialog(New(PRunProfilesDialog, Init), nil);
+  if R=cmOK then
+    begin
+      { If the previously-active profile got deleted, fall back to the first
+        remaining one (or no profile if the list is now empty). The dialog
+        already clamps ActiveRunProfile to Count-1 on cmOK. }
+      if (ActiveRunProfile<0) and (GetRunProfileCount>0) then
+        ActiveRunProfile:=0;
+      if ActiveRunProfile>=GetRunProfileCount then
+        ActiveRunProfile:=GetRunProfileCount-1;
+      ApplyRunProfile(ActiveRunProfile);
+      UpdateRunProfiles;
+      UpdatePrimaryFile;
+      WriteINIFile(false);
+      Update;
+    end;
+end;
+
+procedure TIDEApp.DoActivateRunProfile(Idx: sw_integer);
+begin
+  if (Idx<0) or (Idx>=GetRunProfileCount) then Exit;
+  ApplyRunProfile(Idx);
+  UpdateRunProfiles;
+  UpdatePrimaryFile;
+  WriteINIFile(false);
+end;
+
 procedure TIDEApp.DoResetDebugger;
 begin
 {$ifndef NODEBUG}

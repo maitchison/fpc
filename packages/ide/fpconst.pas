@@ -112,6 +112,7 @@ const
 
      { Main menu submenu indexes }
      menuFile             = 0;
+     menuRun              = 3;
      menuTools            = 6;
 
      { MouseAction constants }
@@ -270,6 +271,9 @@ const
      cmToolsMessages     = 1700;
      cmToolsBase         = 1800;
      cmRecentFileBase    = 1850;
+     cmManageRunProfiles = 1880;
+     cmUpdateRunProfiles = 1881;
+     cmRunProfileBase    = 1900;  { + 1..MaxRunProfileCount = activate that profile }
 
      cmCompiler          = 2000;
      cmMemorySizes       = 2001;
@@ -370,6 +374,8 @@ const
      hcToolsMessages     = hcShift+cmToolsMessages;
      hcToolsBase         = hcShift+cmToolsBase;
      hcRecentFileBase    = hcShift+cmRecentFileBase;
+     hcManageRunProfiles = hcShift+cmManageRunProfiles;
+     hcRunProfileBase    = hcShift+cmRunProfileBase;
 
      hcCompiler          = hcShift+cmCompiler;
      hcCompilerNoAltX    = hcNoAltXShift+cmCompiler;
