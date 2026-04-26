@@ -149,6 +149,7 @@ type
       procedure HelpUsingHelp;
       procedure HelpFiles;
       procedure About;
+      procedure WhatsNew;
       procedure CreateAnsiFile;
     public
       procedure SourceWindowClosed;
@@ -378,6 +379,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_help_prevtopic    = '~P~revious topic';
                 menu_help_using        = '~U~sing help';
                 menu_help_files        = '~F~iles...';
+                menu_help_whatsnew     = '~W~hat''s new...';
                 menu_help_about        = '~A~bout...';
 
                 { Source editor local menu items }
@@ -1120,8 +1122,9 @@ begin
       NewItem(menu_help_using,'',kbNoKey, cmHelpUsingHelp, hcHelpUsingHelp,
       NewItem(menu_help_files,'',kbNoKey, cmHelpFiles, hcHelpFiles,
       NewLine(
+      NewItem(menu_help_whatsnew,'',kbNoKey, cmWhatsNew, hcWhatsNew,
       NewItem(menu_help_about,'',kbNoKey, cmAbout, hcAbout,
-      nil))))))))),
+      nil)))))))))),
     nil)))))))))))));
 end;
 
@@ -1485,6 +1488,7 @@ begin
              cmHelpUsingHelp : HelpUsingHelp;
              cmHelpFiles     : HelpFiles;
              cmAbout         : About;
+             cmWhatsNew      : WhatsNew;
              cmShowReadme    : ShowReadme;
              cmResizeApp     : ResizeApplication(Event.Id, Event.InfoWord);
              cmQuitApp       : Message(@Self, evCommand, cmQuit, nil);

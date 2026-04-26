@@ -322,3 +322,46 @@ begin
   ExecuteDialog(New(PFPAboutDialog, Init), nil);
 end;
 
+procedure TIDEApp.WhatsNew;
+{$I whatsnew.inc}
+var R,R2: TRect;
+    D: PCenterDialog;
+    M: PFPMemo;
+    VSB: PScrollBar;
+    S: PMemoryStream;
+    Title,L: string;
+    I: integer;
+    NL: array[0..1] of char;
+begin
+  New(S, Init(0, 4096));
+  if S^.Status=stOK then
+  begin
+    NL[0]:=#13; NL[1]:=#10;
+    for I:=Low(WhatsNewText) to High(WhatsNewText) do
+      begin
+        L:=WhatsNewText[I];
+        if length(L)>0 then
+          S^.Write(L[1], length(L));
+        S^.Write(NL, 2);
+      end;
+    S^.Seek(0);
+    R.Assign(0,0,72,20);
+    Title:='What''s new in '+VersionStr+BuildCommitStr+BuildOptStr;
+    New(D, Init(R, Title));
+    with D^ do
+    begin
+      GetExtent(R);
+      R.Grow(-2,-2); Inc(R.B.Y);
+      R2.Copy(R); R2.Move(1,0); R2.A.X:=R2.B.X-1;
+      New(VSB, Init(R2)); VSB^.GrowMode:=0; Insert(VSB);
+      New(M, Init(R,nil,VSB,nil));
+      M^.LoadFromStream(S);
+      M^.ReadOnly:=true;
+      Insert(M);
+    end;
+    InsertOK(D);
+    ExecuteDialog(D,nil);
+  end;
+  Dispose(S, Done);
+end;
+

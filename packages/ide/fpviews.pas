@@ -4853,7 +4853,7 @@ begin
   R2.Move(0,1);
   Insert(New(PStaticText, Init(R2, ^C'Target CPU: '+target_cpu_string)));
   R2.Move(0,1);
-  Insert(New(PStaticText, Init(R2, ^C'Version '+VersionStr+BuildCommitStr+' '+{$i %date%})));
+  Insert(New(PStaticText, Init(R2, ^C'Version '+VersionStr+BuildCommitStr+BuildOptStr+' '+{$i %date%})));
   R2.Move(0,1);
 {$ifdef USE_GRAPH_SWITCH}
   Insert(New(PStaticText, Init(R2, ^C'With Graphic Support')));

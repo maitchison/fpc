@@ -23,12 +23,18 @@ uses Views,App,
      WViews,WEditor,WHTMLHlp;
 
 const
-     VersionStr           = '1.0.15';
+     VersionStr           = '1.0.16';
 
 {$ifdef HAS_REVINC}
      BuildCommitStr       = '-'+{$i ide_revision.inc};
 {$else}
      BuildCommitStr       = '';
+{$endif}
+
+{$ifdef BUILD_O3}
+     BuildOptStr          = ' -O3';
+{$else}
+     BuildOptStr          = '';
 {$endif}
 
      MaxRecentFileCount   = 9;
@@ -308,6 +314,7 @@ const
      cmHelpFiles         = 2105;
      cmAbout             = 2106;
      cmHelpDebug         = 2107;
+     cmWhatsNew          = 2108;
 
      cmEditorOptions     = 2202;
      cmBrowserOptions    = 2203;
@@ -406,6 +413,7 @@ const
      hcCodeCompleteOptions=hcShift+cmCodeCompleteOptions;
      hcCodeTemplateOptions=hcShift+cmCodeTemplateOptions;
      hcAbout             = hcShift+cmAbout;
+     hcWhatsNew          = hcShift+cmWhatsNew;
      hcCompilerMessages  = hcShift+cmCompilerMessages;
      hcOpenByName        = hcShift+cmOpenByName;
 

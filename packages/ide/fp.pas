@@ -357,7 +357,7 @@ begin
   { window title first, then screen title, shown when the window is active }
   Video.SetWindowTitle(
      'Free Pascal IDE',
-     'Free Pascal IDE '+VersionStr+BuildCommitStr+' ['+{$i %date%}+'] - Compiler '+Full_Version_String);
+     'Free Pascal IDE '+VersionStr+BuildCommitStr+BuildOptStr+' ['+{$i %date%}+'] - Compiler '+Full_Version_String);
 end;
 {$ENDIF}
 {The square bullet needs an MS-DOS code page. On Unix it is for sure the code
@@ -394,7 +394,7 @@ BEGIN
   HistorySize:=16384;
 
   { Startup info }
-  writeln(bullet+' Free Pascal IDE Version '+VersionStr+BuildCommitStr+' ['+{$i %date%}+']');
+  writeln(bullet+' Free Pascal IDE Version '+VersionStr+BuildCommitStr+BuildOptStr+' ['+{$i %date%}+']');
   writeln(bullet+' Compiler Version '+Full_Version_String);
 
   { Refuse to nest: if FPISDOSSHELL is set we are already running
