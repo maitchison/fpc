@@ -80,7 +80,7 @@ uses
   WUtils,WViews,WHTMLScn,WHelp,
   FPIDE,FPCalc,FPCompil,
   FPIni,FPViews,FPConst,FPVars,FPUtils,FPHelp,FPSwitch,FPUsrScr,
-  FPTools,
+  FPTools,FPRnPro,
 {$ifndef NODEBUG}
   FPDebug,FPRegs,
 {$ifdef GDBMI}
@@ -453,6 +453,7 @@ BEGIN
   InitINIFile;
   InitUserScreen;
   InitTools;
+  InitRunProfiles;
   InitTemplates;
   InitCodeTemplates;
   InitCodeComplete;
@@ -602,6 +603,7 @@ BEGIN
   DoneCodeTemplates;
   DoneTemplates;
   DoneTools;
+  DoneRunProfiles;
   DoneUserScreen;
   DoneSwitches;
   DoneHelpFiles;

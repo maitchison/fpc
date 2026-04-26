@@ -80,6 +80,8 @@ type
       procedure DoJumpToAsm;
       procedure RunDir;
       procedure Parameters;
+      procedure DoManageRunProfiles;
+      procedure DoActivateRunProfile(Idx: sw_integer);
       procedure DoStepOver;
       procedure DoTraceInto;
       procedure DoRun;
@@ -167,6 +169,7 @@ type
       procedure UpdateINIFile;
       procedure UpdateRecentFileList;
       procedure UpdateTools;
+      procedure UpdateRunProfiles;
     end;
 
 procedure PutEvent(TargetView: PView; E: TEvent);
@@ -198,7 +201,7 @@ uses
   Systems,
   WUtils,WHlpView,WViews,WHTMLHlp,WHelp,WConsole,
   FPConst,FPVars,FPUtils,FPIni,FPIntf,FPCompil,FPHelp,
-  FPTemplt,FPCalc,FPUsrScr,FPTools,FPFindF,
+  FPTemplt,FPCalc,FPUsrScr,FPTools,FPRnPro,FPFindF,
 {$ifndef NODEBUG}
   FPDebug,FPRegs,
 {$endif}
@@ -292,6 +295,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_run_untilreturn   = '~U~ntil return';
                 menu_run_rundir        = 'Run ~D~irectory...';
                 menu_run_parameters    = 'P~a~rameters...';
+                menu_run_manageprofiles = 'Manage run pro~f~iles...';
                 menu_run_resetdebugger = '~P~rogram reset';
 
                 menu_compile           = '~C~ompile';
@@ -999,8 +1003,9 @@ begin
       NewItem(menu_run_untilreturn,menu_key_run_untilreturn, kbAltF4,cmUntilReturn,hcUntilReturn,
       NewItem(menu_run_rundir,'', kbNoKey, cmRunDir, hcRunDir,
       NewItem(menu_run_parameters,'', kbNoKey, cmParameters, hcParameters,
+      NewItem(menu_run_manageprofiles,'', kbNoKey, cmManageRunProfiles, hcManageRunProfiles,
       NewItem(menu_run_resetdebugger,menu_key_run_resetdebugger, kbCtrlF2, cmResetDebugger, hcResetDebugger,
-      nil))))))))),
+      nil)))))))))),
     NewSubMenu(menu_compile,hcCompileMenu, NewMenu(
       NewItem(menu_compile_compile,menu_key_compile_compile, kbAltF9, cmCompile, hcCompile,
       NewItem(menu_compile_make,menu_key_compile_make, kbF9, cmMake, hcMake,
@@ -1393,6 +1398,10 @@ begin
            { -- Run menu -- }
              cmRunDir        : RunDir;
              cmParameters    : Parameters;
+             cmManageRunProfiles : DoManageRunProfiles;
+             cmRunProfileBase+1..
+             cmRunProfileBase+MaxRunProfileCount
+                             : DoActivateRunProfile(Event.Command-cmRunProfileBase-1);
              cmStepOver      : DoStepOver;
              cmTraceInto     : DoTraceInto;
              cmRun,
@@ -1488,6 +1497,8 @@ begin
              SaveCancelled:=true;
            cmUpdateTools :
              UpdateTools;
+           cmUpdateRunProfiles :
+             UpdateRunProfiles;
            cmCommandSetChanged :
              UpdateMenu(MenuBar^.Menu);
            cmUpdate              :
@@ -1745,6 +1756,7 @@ begin
 {$endif}
   SetCmdState([cmToolsMsgNext,cmToolsMsgPrev],MessagesWindow<>nil);
   UpdateTools;
+  UpdateRunProfiles;
   UpdateRecentFileList;
   UpdatePrimaryFile;
   UpdateINIFile;
@@ -1870,6 +1882,47 @@ begin
     GetToolParams(I-1,S1,S2,S3,W);
     P:=NewItem(S1,KillTilde(GetHotKeyName(W)),W,cmToolsBase+I,hcToolsBase+I,nil);
     AppendMenuItem(ToolsMenu^.SubMenu,P);
+  end;
+end;
+
+procedure TIDEApp.UpdateRunProfiles;
+var P: PMenuItem;
+    I: word;
+    RunMenu: PMenuItem;
+    SN, SM, SParams, Title, Marker: string;
+begin
+  if not assigned(MenuBar) then exit;
+  RunMenu:=SearchSubMenu(MenuBar^.Menu,menuRun);
+  { Strip any previously appended profile items + trailing separator. }
+  repeat
+    P:=GetMenuItemBefore(RunMenu^.SubMenu,nil);
+    if (P<>nil) then
+    begin
+      if (cmRunProfileBase<P^.Command) and
+         (P^.Command<=cmRunProfileBase+MaxRunProfileCount) then
+        begin
+          RemoveMenuItem(RunMenu^.SubMenu,P);
+          if RunMenu^.SubMenu^.Default=P then
+            RunMenu^.SubMenu^.Default:=RunMenu^.SubMenu^.Items;
+        end
+      else
+        P:=nil;
+    end;
+  until P=nil;
+  P:=GetMenuItemBefore(RunMenu^.SubMenu,nil);
+  if (P<>nil) and IsSeparator(P) then
+     RemoveMenuItem(RunMenu^.SubMenu,P);
+
+  if GetRunProfileCount>0 then
+     AppendMenuItem(RunMenu^.SubMenu,NewLine(nil));
+  for I:=1 to GetRunProfileCount do
+  begin
+    GetRunProfileParams(I-1,SN,SM,SParams);
+    if SN='' then SN:='(unnamed)';
+    if Integer(I-1)=ActiveRunProfile then Marker:='[*]' else Marker:='[ ]';
+    Title:=Marker+' '+SN;
+    P:=NewItem(Title,'',kbNoKey,cmRunProfileBase+I,hcRunProfileBase+I,nil);
+    AppendMenuItem(RunMenu^.SubMenu,P);
   end;
 end;
 
