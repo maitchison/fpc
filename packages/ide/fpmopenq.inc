@@ -1,11 +1,15 @@
 {
     This file is part of the Free Pascal Integrated Development Environment
 
-    Quick-open file dialog (Ctrl+U). Shows a filterable list of .pas /
-    .pp / .inc files drawn from the project directory and every -Fu /
-    -Fi search directory. Matching is prefix-based on the file stem,
-    also matching the stem with a leading 'U' stripped (so 'graph'
-    finds ugraph.pas while 'uber' still finds uber.pas).
+    Quick-open file dialog (Ctrl+U). Shows a filterable list of source
+    files drawn from the project directory and every -Fu / -Fi search
+    directory. The set of file extensions to include is controlled by
+    the QuickOpenRec.IncludeMask field (a ';'-separated DOS wildcard
+    list, e.g. '*.pas;*.inc;*.pp;*.ini'); the dialog exposes it as an
+    editable input line. Matching against the typed query is prefix-
+    based on the file stem, also matching the stem with a leading 'U'
+    stripped (so 'graph' finds ugraph.pas while 'uber' still finds
+    uber.pas).
 
     See the file COPYING.FPC, included in this distribution,
     for details about the copyright.
@@ -19,8 +23,9 @@
 
 const
   QuickOpenDialogW = 70;
-  QuickOpenDialogH = 19;
+  QuickOpenDialogH = 21;
   QuickOpenMaxQuery = 63;
+  QuickOpenIncludeId = 113;
 
 type
   PQuickOpenItem = ^TQuickOpenItem;
@@ -31,6 +36,7 @@ type
     KeyA        : PString;   { upper(stem) }
     KeyB        : PString;   { upper(stem), leading 'U' stripped if len>1 }
     Score       : byte;      { 0 = prefix of KeyA, 1 = prefix of KeyB }
+    ExtPri      : byte;      { 0=.pas, 1=.pp, 2=.inc, 3=.dpr/.lpr, 4=other }
   end;
 
   PQuickOpenOwnedList = ^TQuickOpenOwnedList;
@@ -51,6 +57,12 @@ type
     procedure HandleEvent(var Event: TEvent); virtual;
   end;
 
+  PQuickOpenMaskInput = ^TQuickOpenMaskInput;
+  TQuickOpenMaskInput = object(TInputLine)
+    LastSeen : string;
+    procedure HandleEvent(var Event: TEvent); virtual;
+  end;
+
   PQuickOpenListBox = ^TQuickOpenListBox;
   TQuickOpenListBox = object(TListBox)
     function GetText(Item, MaxLen: Sw_Integer): string; virtual;
@@ -59,6 +71,7 @@ type
   TQuickOpenDialog = object(TCenterDialog)
     AllItems   : PQuickOpenOwnedList;
     Input      : PQuickOpenInput;
+    MaskInput  : PQuickOpenMaskInput;
     ListBox    : PQuickOpenListBox;
     Counts     : PStaticText;
     TotalCount : Sw_Integer;
@@ -111,18 +124,34 @@ begin
   QOStripExt := Name;
 end;
 
-function QOIsPasExt(const Name: string): boolean;
+{ True if Name matches QuickOpenRec.IncludeMask. Uses MatchAnyMask
+  from FPFindF for parity with the Find-in-Files dialog. An empty
+  mask matches nothing (caller must seed it with a sensible default). }
+function QOMatchesMask(const Name: string): boolean;
+begin
+  QOMatchesMask := MatchAnyMask(Name, QuickOpenRec.IncludeMask);
+end;
+
+{ Extension priority for sort tie-breaking. Lower = preferred. Pascal
+  source wins over headers, then over project files, then over anything
+  else (e.g. .ini, .cfg) -- so typing 'encode' lands encode.pas above
+  encode.ini even when both directories scan in. }
+function QOExtPriority(const Name: string): byte;
 var up: string; len: Sw_Integer;
 begin
-  QOIsPasExt := false;
   up := QOUpper(Name);
   len := Length(up);
   if (len >= 4) and (Copy(up, len - 3, 4) = '.PAS') then
-    QOIsPasExt := true
-  else if (len >= 4) and (Copy(up, len - 3, 4) = '.INC') then
-    QOIsPasExt := true
+    QOExtPriority := 0
   else if (len >= 3) and (Copy(up, len - 2, 3) = '.PP') then
-    QOIsPasExt := true;
+    QOExtPriority := 1
+  else if (len >= 4) and (Copy(up, len - 3, 4) = '.INC') then
+    QOExtPriority := 2
+  else if (len >= 4) and ((Copy(up, len - 3, 4) = '.DPR') or
+                          (Copy(up, len - 3, 4) = '.LPR')) then
+    QOExtPriority := 3
+  else
+    QOExtPriority := 4;
 end;
 
 function QOPadRight(const S: string; Width: Sw_Integer): string;
@@ -266,6 +295,25 @@ begin
 end;
 
 {----------------------------------------------------------------}
+{  Mask input line — re-scan corpus when mask changes            }
+{----------------------------------------------------------------}
+
+procedure TQuickOpenMaskInput.HandleEvent(var Event: TEvent);
+var dlg: PQuickOpenDialog;
+begin
+  inherited HandleEvent(Event);
+  dlg := PQuickOpenDialog(Owner);
+  if (Data <> nil) and (dlg <> nil) then
+    if Data^ <> LastSeen then
+    begin
+      LastSeen := Data^;
+      QuickOpenRec.IncludeMask := Data^;
+      dlg^.ScanCorpus;
+      dlg^.Refilter;
+    end;
+end;
+
+{----------------------------------------------------------------}
 {  Custom listbox — two-column row                               }
 {----------------------------------------------------------------}
 
@@ -298,15 +346,17 @@ end;
 
 constructor TQuickOpenDialog.Init;
 var
-  R, RL, RI, RS, RSB, RB : TRect;
+  R, RL, RI, RML, RMI, RMH, RS, RSB, RB : TRect;
   VSB : PScrollBar;
   Lbl : PLabel;
+  Hist: PHistory;
 begin
   R.Assign(0, 0, QuickOpenDialogW, QuickOpenDialogH);
   inherited Init(R, dialog_openbyname);
   HelpCtx := hcOpenByName;
   AllItems := nil;
   Input    := nil;
+  MaskInput:= nil;
   ListBox  := nil;
   Counts   := nil;
   TotalCount := 0;
@@ -314,19 +364,35 @@ begin
   GetExtent(R);
   R.Grow(-2, -1);
 
-  { Input line at top }
+  { File-filter input line at top. Leave a 3-column strip on the
+    right unused so the layout aligns with the mask line below. }
   RL.Copy(R); RL.B.Y := RL.A.Y + 1; RL.B.X := RL.A.X + 7;
   RI.Copy(R); RI.B.Y := RI.A.Y + 1; RI.A.X := RL.B.X + 1;
+  RI.B.X := RI.B.X - 3;
   New(Input, Init(RI, QuickOpenMaxQuery));
   Input^.LastSeen := '';
   Insert(Input);
   New(Lbl, Init(RL, label_openbyname_filter, Input));
   Insert(Lbl);
 
+  { Mask input line, one row below — with a history dropdown so
+    previous masks can be recalled (mirrors Find in Files). }
+  RML.Copy(RL); RML.Move(0, 2); RML.B.X := RL.A.X + 7;
+  RMI.Copy(RI); RMI.Move(0, 2);
+  New(MaskInput, Init(RMI, QuickOpenMaskSize));
+  MaskInput^.Data^ := QuickOpenRec.IncludeMask;
+  MaskInput^.LastSeen := QuickOpenRec.IncludeMask;
+  Insert(MaskInput);
+  New(Lbl, Init(RML, label_openbyname_mask, MaskInput));
+  Insert(Lbl);
+  RMH.Assign(RMI.B.X, RMI.A.Y, RMI.B.X + 3, RMI.B.Y);
+  New(Hist, Init(RMH, MaskInput, QuickOpenIncludeId));
+  Insert(Hist);
+
   { Scrollbar + list fill the middle. List occupies R minus the
     right-hand 1-column strip used by the scrollbar. }
   RB.Copy(R); RB.A.Y := RB.B.Y - 1; RB.B.Y := RB.A.Y + 1;
-  RS.Copy(R); RS.A.Y := RI.B.Y + 1; RS.B.Y := RB.A.Y - 1;
+  RS.Copy(R); RS.A.Y := RMI.B.Y + 1; RS.B.Y := RB.A.Y - 1;
   RSB.Copy(RS); RSB.A.X := RS.B.X - 1;
   Dec(RS.B.X);
   VSB := New(PScrollBar, Init(RSB));
@@ -406,7 +472,7 @@ begin
   while rc = 0 do
   begin
     if (sr.Attr and Directory) = 0 then
-      if QOIsPasExt(sr.Name) then
+      if QOMatchesMask(sr.Name) then
       begin
         base := sr.Name;
         full := FExpand(normDir + '\' + base);
@@ -427,6 +493,7 @@ begin
           item^.KeyA        := NewStr(stemUp);
           item^.KeyB        := NewStr(stemStripped);
           item^.Score       := 0;
+          item^.ExtPri      := QOExtPriority(base);
           Items^.Insert(item);
           Seen^.InsertStr(fullKey);
         end;
@@ -466,8 +533,11 @@ var
   seen    : PUnsortedStringCollection;
   projDir : string;
 begin
-  if AllItems = nil then
-    New(AllItems, Init(64, 64));
+  { Re-scans replace the existing corpus rather than appending to it,
+    so a mask change immediately reflects the new extension set. }
+  if AllItems <> nil then
+    Dispose(AllItems, Done);
+  New(AllItems, Init(64, 64));
   New(seen, Init(64, 64));
 
   { 1. Project / current directory }
@@ -484,8 +554,11 @@ begin
   TotalCount := AllItems^.Count;
 end;
 
-{ Insertion sort the filter list in place. Ascending by (Score, KeyA,
-  DisplayDir). N is small (<= TotalCount, typically a few hundred). }
+{ Insertion sort the filter list in place. Ascending by
+  (Score, KeyA, ExtPri, DisplayDir). KeyA before ExtPri means
+  encode.pas + encode.ini list together (both stem 'ENCODE'),
+  with .pas first within that pair. N is small (<= TotalCount,
+  typically a few hundred). }
 procedure QOSortFilter(C: PQuickOpenFilterList);
   function Less(a, b: PQuickOpenItem): boolean;
   var ka, kb, da, db: string;
@@ -500,6 +573,11 @@ procedure QOSortFilter(C: PQuickOpenFilterList);
     if ka <> kb then
     begin
       Less := ka < kb;
+      exit;
+    end;
+    if a^.ExtPri <> b^.ExtPri then
+    begin
+      Less := a^.ExtPri < b^.ExtPri;
       exit;
     end;
     if a^.DisplayDir <> nil then da := a^.DisplayDir^ else da := '';
@@ -625,16 +703,27 @@ procedure TIDEApp.OpenByName;
 var
   D        : PQuickOpenDialog;
   chosen   : string;
+  savedMask: string;
   res      : Word;
   existing : PSourceWindow;
   src      : PSourceWindow;
 begin
+  { Snapshot the persisted mask so a Cancel reverts any edits the
+    user made to the textbox; OK keeps the new mask. }
+  savedMask := QuickOpenRec.IncludeMask;
   New(D, Init);
   D^.ScanCorpus;
   D^.Refilter;
   res := Application^.ExecView(D);
   chosen := '';
-  if res = cmOK then chosen := D^.ChosenPath;
+  if res = cmOK then
+  begin
+    chosen := D^.ChosenPath;
+    if D^.MaskInput <> nil then
+      QuickOpenRec.IncludeMask := D^.MaskInput^.Data^;
+  end
+  else
+    QuickOpenRec.IncludeMask := savedMask;
   Dispose(D, Done);
   if (res <> cmOK) or (chosen = '') then exit;
 

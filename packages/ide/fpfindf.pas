@@ -33,12 +33,21 @@ const
   FindInFilesIncludeId = 111;
   FindInFilesExcludeId = 112;
 
+  QuickOpenMaskSize    = 127;
+
 type
   TFindInFilesRec = record
     SearchStr  : String[FindInFilesStrSize];
     IncludeMask: String[FindInFilesMaskSize];
     ExcludeMask: String[FindInFilesMaskSize];
     Flags      : word;
+  end;
+
+  { Persistent settings for the Quick-Open (Ctrl+U) dialog. Lives
+    here -- rather than alongside the dialog code in fpmopenq.inc --
+    so fpini can read/write it without dragging in fpide. }
+  TQuickOpenRec = record
+    IncludeMask: String[QuickOpenMaskSize];
   end;
 
 const
@@ -49,8 +58,17 @@ const
     Flags      : fifRecurse;
   );
 
+  QuickOpenRec : TQuickOpenRec = (
+    IncludeMask: '*.pas;*.inc;*.pp;*.ini'
+  );
+
 function ExecuteFindInFilesDialog: boolean;
 procedure RunFindInFilesSearch;
+
+{ DOS-style wildcard match against a ';'-separated mask list (case-
+  insensitive). Exposed so other IDE pieces (e.g. the Quick-Open
+  dialog) can reuse the same matching rules. }
+function MatchAnyMask(const Name, MaskList: string): boolean;
 
 implementation
 
