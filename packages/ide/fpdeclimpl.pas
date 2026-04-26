@@ -215,8 +215,8 @@ end;
   procedure `, possibly including `ClassName.`). Stripped is Line with
   comments and string contents blanked. }
 function ParseHeader(const Stripped: string;
-  out Kind, ClassName, RoutineName: string;
-  out NameX: sw_integer): boolean;
+  var Kind, ClassName, RoutineName: string;
+  var NameX: sw_integer): boolean;
 var
   P, NamePos: sw_integer;
   T, Lo, A: string;
@@ -256,7 +256,7 @@ end;
 { Returns true if Line introduces a class/object/interface/record block,
   e.g. "  TFoo = class(TBar)". Forward type aliases like "TFoo = class;"
   and metatype "class of TBar" do NOT open a block. }
-function LineOpensClassBlock(const Stripped: string; out CName: string): boolean;
+function LineOpensClassBlock(const Stripped: string; var CName: string): boolean;
 var
   P: sw_integer;
   A, K, Next: string;
@@ -352,7 +352,7 @@ end;
 function FindEnclosingHeader(Ed: PSourceEditor;
   CurY, SectionStart: sw_integer;
   TopLevelOnly: boolean;
-  out H: THeaderInfo): boolean;
+  var H: THeaderInfo): boolean;
 var
   i: sw_integer;
   S, Stripped: string;
@@ -392,7 +392,7 @@ end;
   approximate with: find the most recent opener; assume we're inside it. }
 function FindEnclosingClass(Ed: PSourceEditor;
   HdrY, IntfStart: sw_integer;
-  out CName: string): boolean;
+  var CName: string): boolean;
 var
   i, EndsSeen: sw_integer;
   S, Stripped, Tmp: string;
@@ -429,7 +429,7 @@ end;
 function FindRoutineInImpl(Ed: PSourceEditor;
   ImplStartY: sw_integer;
   const ClsName, RoutineName: string;
-  out HitY, HitX: sw_integer): boolean;
+  var HitY, HitX: sw_integer): boolean;
 var
   i, Last: sw_integer;
   S, Stripped: string;
@@ -457,7 +457,7 @@ end;
 function FindRoutineInIntf(Ed: PSourceEditor;
   IntfStartY, ImplStartY: sw_integer;
   const ClsName, RoutineName: string;
-  out HitY, HitX: sw_integer): boolean;
+  var HitY, HitX: sw_integer): boolean;
 var
   i, Limit, Depth: sw_integer;
   Stripped, OpenedCls, K, C, N: string;
