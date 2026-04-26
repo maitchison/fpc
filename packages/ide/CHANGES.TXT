@@ -1,0 +1,92 @@
+Free Pascal IDE / Compiler -- changelog
+=======================================
+
+Most recent version first. The IDE shows this file from
+Help | What's new... (loaded from the install directory at
+runtime; LocateFile searches CWD, IDE startup dir, IDE install
+dir).
+
+
+== IDE 1.0.16 / Compiler 3.3.3 ==
+
+IDE
+  * Quick-Open (Ctrl+U): mask textbox lets you filter the file
+    list by extension or name pattern; persists across sessions.
+    Result list now sorts by extension priority so .pas/.pp
+    sources show ahead of .ppu/.o build artefacts.
+  * DOS Shell: command prompt is marked so the user can tell
+    they're in a shell-out; refuses to re-enter while one is
+    already running (FPISDOSSHELL env-var guard). Avoids the
+    stacked-IDE / leaked-temp-files trap.
+  * Editor color fixes; new INI and ASM file syntax highlighting.
+  * Run profiles: named bundles of (main file, run params),
+    switchable from the Run menu. Per-project, persisted with
+    the desktop.
+  * Alt+Up / Alt+Down: jump between interface declaration and
+    implementation of the procedure under the cursor.
+  * Ctrl+Enter go-to-definition; Alt+Left / Alt+Right back/forward
+    navigation history (browser-style).
+  * Shift+Tab peek-definition popup -- shows the declaration
+    of the symbol under the cursor without leaving your spot.
+  * Find in Files: dialog state (last query, mask, options)
+    persists across sessions; fix command-code collision that
+    was triggering Comment-selection instead.
+  * Search | Jump to Asm: grayed out when no source is focused.
+  * Wordstar prefix chord (Ctrl-K, Ctrl-Q) no longer eats its
+    second key when the key matches a menu hot-key letter
+    (e.g. Ctrl-K W).
+  * Help | What's new...: this dialog. Loads CHANGES.TXT from
+    the install directory at runtime.
+  * About box and splash banner now show "-O3" suffix when the
+    binary was built with the -O3 chain (BUILD_O3 define,
+    flipped on by build-full-go32v2-o3.sh).
+
+Compiler
+  * fppu: reopen parent ppufile after deferred load. Fixes
+    SIGSEGV / IDE "signal 291" when the trunk ctask scheduler
+    left a parent ppu tempclosed while compiling a unit that
+    triggered deferred reads.
+  * browcol: replace TPointerDictionary sorted-collection with
+    a chained hash table. Large speed-up for symbol browsing on
+    big projects where the old O(N log N) insert dominated.
+
+
+== IDE 1.0.15 / Compiler 3.3.2 ==
+
+First version to stamp build commit short hash into the binary
+banners (e.g. "3.3.2-a885a49" / "1.0.15-a885a49") via
+compiler/revision.inc and packages/ide/ide_revision.inc emitted
+by build-full-go32v2*.sh.
+
+IDE
+  * Ctrl+U Quick-Open by filename across project + -Fu/-Fi paths.
+  * Find in Files (Ctrl+Shift+F), results in the Messages window.
+  * Search | Jump to Asm Source (Alt+A); auto-recompiles -al
+    if needed.
+  * Open source files maximized + optional chromeless full-screen
+    mode (F5 toggles); two new flags in Options | Editor.
+  * S3-specific wide text-mode probe runs after VBE enumeration
+    so S3-family chipsets expose 100/132-column modes the BIOS
+    hides.
+  * Recent Files uses move-to-front MRU on every open.
+  * DOS Shell / File | Open anchor to the IDE's launch PWD.
+  * Pentium CPU-target menu labels corrected (-CpPENTIUM2 was
+    mis-labelled "PentiumMMX" -- selecting it on a real P55C
+    crashed with invalid-opcode / page fault).
+
+Compiler (i386)
+  * New PENTIUMMMX cputype (P55C; P5 + MMX, no CMOV) between
+    Pentium and Pentium 2.
+  * -CpPENTIUM4 etc. now auto-define CPUX86_HAS_MMX / _SSEUNIT /
+    _SSE2 to match the selected cputype -- no manual -d flags
+    needed.
+  * x86 peephole: imul by 2^n +/- 1 lowers to lea/shl + add/sub.
+
+RTL (i386 / go32v2)
+  * FillChar / FillWord / FillDWord / FillQWord MMX variants,
+    auto-dispatched on MMX-capable CPUs without SSE2.
+  * Move: startup probe detects broken 64-bit-precision emulator
+    FPUs (em-dosbox, 86Box default) and falls back to a plain
+    rep-movsl path that avoids x87 entirely.
+  * Text-mode cursor scales to the actual VGA font height
+    (16 scan lines in 80x25) instead of a hardcoded 7.

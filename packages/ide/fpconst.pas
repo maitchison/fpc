@@ -37,6 +37,8 @@ const
      BuildOptStr          = '';
 {$endif}
 
+     ChangesName          = 'changes.txt';
+
      MaxRecentFileCount   = 9;
      MaxToolCount         = 16;
 

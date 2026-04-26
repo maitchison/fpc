@@ -323,30 +323,25 @@ begin
 end;
 
 procedure TIDEApp.WhatsNew;
-{$I whatsnew.inc}
 var R,R2: TRect;
     D: PCenterDialog;
     M: PFPMemo;
     VSB: PScrollBar;
-    S: PMemoryStream;
-    Title,L: string;
-    I: integer;
-    NL: array[0..1] of char;
+    S: PFastBufStream;
+    Path,Title: string;
 begin
-  New(S, Init(0, 4096));
+  Path:=LocateFile(ChangesName);
+  if Path='' then
+    begin
+      InformationBox('Could not find '+ChangesName+#13+
+        '(searched current dir, IDE startup dir, IDE install dir).',nil);
+      Exit;
+    end;
+  New(S, Init(Path, stOpenRead, 4096));
   if S^.Status=stOK then
   begin
-    NL[0]:=#13; NL[1]:=#10;
-    for I:=Low(WhatsNewText) to High(WhatsNewText) do
-      begin
-        L:=WhatsNewText[I];
-        if length(L)>0 then
-          S^.Write(L[1], length(L));
-        S^.Write(NL, 2);
-      end;
-    S^.Seek(0);
     R.Assign(0,0,72,20);
-    Title:='What''s new in '+VersionStr+BuildCommitStr+BuildOptStr;
+    Title:='What''s new -- '+VersionStr+BuildCommitStr+BuildOptStr;
     New(D, Init(R, Title));
     with D^ do
     begin
