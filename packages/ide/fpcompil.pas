@@ -142,7 +142,7 @@ uses
   CompHook, Compiler, systems, browcol,
   WEditor,
   FPRedir,FPDesk,
-  FPUsrScr,FPHelp,
+  FPUsrScr,FPHelp,FPDefIdx,
 {$ifndef NODEBUG}FPDebug,{$endif}
   FPConst,FPVars,FPUtils,
   FPCodCmp,FPIntf,FPSwitch;
@@ -1093,6 +1093,7 @@ begin
       begin
         CompilationPhase:=cpDone;
         LastCompileTime := cardinal(Now);
+        DefIndexSnapshotMTimes;
       end
     else
       CompilationPhase:=cpFailed;

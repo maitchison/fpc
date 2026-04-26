@@ -65,6 +65,12 @@ const
       cmInputLineLen         = 51269;
       cmScrollOneUp          = 51270;
       cmScrollOneDown        = 51271;
+      cmGotoDefinition       = 51272;
+      cmGotoImpl             = 51273;
+      cmPeekDefinition       = 51274;
+      cmNavBack              = 51275;
+      cmNavForward           = 51276;
+      cmFindSymbol           = 51277;
 
       EditorTextBufSize = 32768;
 {$if sizeof(sw_astring)>8}

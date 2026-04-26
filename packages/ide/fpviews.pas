@@ -576,7 +576,8 @@ uses
   {$ifdef VESA}Vesa,{$endif}
   {$ifdef S3PROBE}S3Modes,{$endif}
   FPSymbol,FPDebug,FPVars,FPUtils,FPCompil,FPHelp,
-  FPTools,FPIDE,FPCodTmp,FPCodCmp;
+  FPTools,FPIDE,FPCodTmp,FPCodCmp,
+  FPDefIdx,FPNavStk;
 
 const
   RSourceEditor: TStreamRec = (
@@ -2263,10 +2264,34 @@ begin
   Valid:=OK;
 end;
 
+{ FlashEditorStatus paints a single line of text over the bottom row of
+  the screen (where the standard status line lives). The next event
+  redraws the real status line and clears it -- so the message acts
+  like a transient flash, ideal for "go to definition: not found" style
+  feedback that we don't want a modal popup for. }
+procedure FlashEditorStatus(const S: string);
+var
+  i, base: sw_integer;
+  attr: word;
+  msg: string;
+begin
+  if (ScreenWidth<=0) or (ScreenHeight<=0) or (VideoBuf=nil) then exit;
+  attr:=$1F shl 8;  { white on blue, like the standard status line }
+  msg:=' '+S;
+  if length(msg)>ScreenWidth then msg:=Copy(msg,1,ScreenWidth);
+  while length(msg)<ScreenWidth do msg:=msg+' ';
+  base:=(ScreenHeight-1)*ScreenWidth;
+  for i:=0 to ScreenWidth-1 do
+    VideoBuf^[base+i]:=attr or ord(msg[i+1]);
+  UpdateScreen(false);
+end;
 
 procedure TSourceEditor.HandleEvent(var Event: TEvent);
 var DontClear: boolean;
     S: string;
+    Matches: PDefMatchList;
+    Match: PDefMatch;
+    TargetW: PSourceWindow;
 begin
   TranslateMouseClick(@Self,Event);
   case Event.What of
@@ -2275,7 +2300,11 @@ begin
         DontClear:=false;
         case Event.KeyCode of
           kbCtrlEnter :
-            Message(@Self,evCommand,cmOpenAtCursor,nil);
+            Message(@Self,evCommand,cmGotoDefinition,nil);
+          kbAltLeft :
+            Message(@Self,evCommand,cmNavBack,nil);
+          kbAltRight :
+            Message(@Self,evCommand,cmNavForward,nil);
         else DontClear:=true;
         end;
         if not DontClear then ClearEvent(Event);
@@ -2316,6 +2345,42 @@ begin
                             S+'.inc';
               Message(Application,evCommand,cmOpen,nil);
             end;
+          cmGotoDefinition :
+            begin
+              S:=GetEditorCurWord(@Self,[]);
+              if S='' then
+                FlashEditorStatus('Go to definition: no identifier at cursor')
+              else if not DefIndexAvailable then
+                FlashEditorStatus(
+                  'Go to definition: no browser info ('+S+
+                  ') -- enable Options|Compiler|Browser and recompile')
+              else
+                begin
+                  Matches:=DefIndexResolve(S);
+                  if (Matches<>nil) and (Matches^.Count>0) then
+                    begin
+                      Match:=Matches^.At(0);
+                      NavStackPush(FileName, CurPos.X, CurPos.Y);
+                      TargetW:=TryToOpenFile(nil, Match^.FileName^,
+                                             Match^.Col-1, Match^.Line-1, true);
+                      if Assigned(TargetW) then TargetW^.Select;
+                      if Matches^.Count>1 then
+                        FlashEditorStatus(
+                          S+': '+IntToStr(Matches^.Count)+
+                          ' matches; jumped to first');
+                      Dispose(Matches, Done);
+                    end
+                  else
+                    begin
+                      if Matches<>nil then Dispose(Matches, Done);
+                      FlashEditorStatus('Go to definition: symbol not found: '+S);
+                    end;
+                end;
+            end;
+          cmNavBack :
+            NavStackBack(FileName, CurPos.X, CurPos.Y);
+          cmNavForward :
+            NavStackForward(FileName, CurPos.X, CurPos.Y);
           cmEditorOptions :
             Message(Application,evCommand,cmEditorOptions,@Self);
           cmHelp :
