@@ -463,6 +463,7 @@ function  NewTabDef(AName: string; ADefItem: PView; AItems: PTabItem; ANext: PTa
 procedure DisposeTabDef(P: PTabDef);
 
 function GetEditorCurWord(Editor: PEditor; ValidSpecChars: TCharSet): string;
+procedure FlashEditorStatus(const S: string);
 procedure InitReservedWords;
 procedure DoneReservedWords;
 function GetReservedWordCount: integer;
@@ -577,7 +578,7 @@ uses
   {$ifdef S3PROBE}S3Modes,{$endif}
   FPSymbol,FPDebug,FPVars,FPUtils,FPCompil,FPHelp,
   FPTools,FPIDE,FPCodTmp,FPCodCmp,
-  FPDefIdx,FPNavStk,FPPeek;
+  FPDefIdx,FPNavStk,FPPeek,FPDeclImpl;
 
 const
   RSourceEditor: TStreamRec = (
@@ -2276,7 +2277,7 @@ var
   msg: string;
 begin
   if (ScreenWidth<=0) or (ScreenHeight<=0) or (VideoBuf=nil) then exit;
-  attr:=$1F shl 8;  { white on blue, like the standard status line }
+  attr:=$8F shl 8;  { bright white on dark gray }
   msg:=' '+S;
   if length(msg)>ScreenWidth then msg:=Copy(msg,1,ScreenWidth);
   while length(msg)<ScreenWidth do msg:=msg+' ';
@@ -2307,6 +2308,10 @@ begin
             Message(@Self,evCommand,cmNavBack,nil);
           kbAltRight :
             Message(@Self,evCommand,cmNavForward,nil);
+          kbAltUp :
+            DeclImplJumpUp(@Self);
+          kbAltDown :
+            DeclImplJumpDown(@Self);
         else DontClear:=true;
         end;
         if not DontClear then ClearEvent(Event);
