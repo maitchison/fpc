@@ -233,7 +233,9 @@ const
 
      cmPrint             = 248;
      cmSymPrevious       = 249; {previous symbol browser window}
-     cmFindInFiles       = 250; {global Find in Files (Ctrl+Shift+F)}
+     {250 = cmCommentSel, 251 = cmUnCommentSel (defined in wviews.pas);
+      reserved here so future renumbers don't collide.}
+     cmFindInFiles       = 252; {global Find in Files (Ctrl+Shift+F)}
 
      cmNotImplemented    = 1000;
      cmNewFromTemplate   = 1001;
