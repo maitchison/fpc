@@ -1948,6 +1948,12 @@ procedure TIDEApp.DosShell;
 var
   s : string;
   SavedDir : string;
+{$ifndef Unix}
+{$ifndef HASAMIGA}
+  BatPath : string;
+  BatF : Text;
+{$endif}
+{$endif}
 begin
 {$ifdef HASAMIGA}
   s := 'C:NewShell';
@@ -1979,7 +1985,37 @@ begin
       GetDir(0,SavedDir);
       {$I-} ChDir(TrimEndSlash(OrigStartupDir)); {$I+}
       EatIO;
+{$ifndef Unix}
+{$ifndef HASAMIGA}
+      { Wrap the shell in a one-shot batch that plants a re-entry
+        marker env var and a distinctive PROMPT, then invokes the
+        interactive shell. When the user types EXIT, the inner shell
+        exits, the batch ends, and the env-var/PROMPT changes die
+        with it -- they never leak back to fp.exe's own environment. }
+      BatPath:=TrimEndSlash(OrigStartupDir)+DirSep+FPDosShellBatName;
+      Assign(BatF,BatPath);
+      {$I-} Rewrite(BatF); {$I+}
+      if IOResult=0 then
+        begin
+          Writeln(BatF,'@echo off');
+          Writeln(BatF,'set ',FPDosShellEnvVar,'=1');
+          Writeln(BatF,'set PROMPT=[FP]$P$G');
+          Writeln(BatF,'"',s,'"');
+          Close(BatF);
+          DoExecute(BatPath, '', '', '', '', exDosShell);
+          {$I-} Erase(BatF); {$I+}
+          EatIO;
+        end
+      else
+        { Couldn't write the batch -- fall back to a bare shell so
+          DOS Shell still works, just without the prompt cue. }
+        DoExecute(s, '', '', '', '', exDosShell);
+{$else}
       DoExecute(s, '', '', '', '', exDosShell);
+{$endif}
+{$else}
+      DoExecute(s, '', '', '', '', exDosShell);
+{$endif}
       {$I-} ChDir(TrimEndSlash(SavedDir)); {$I+}
       EatIO;
     end;

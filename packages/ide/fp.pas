@@ -276,6 +276,7 @@ procedure DelTempFiles;
 begin
   DeleteFile(FPOutFileName);
   DeleteFile(FPErrFileName);
+  DeleteFile(FPDosShellBatName);
   DeleteFile(GDBOutFileName);
   DeleteFile(GDBOutPutFileName);
   DeleteFile(GREPOutName);
@@ -395,6 +396,18 @@ BEGIN
   { Startup info }
   writeln(bullet+' Free Pascal IDE Version '+VersionStr+BuildCommitStr+' ['+{$i %date%}+']');
   writeln(bullet+' Compiler Version '+Full_Version_String);
+
+  { Refuse to nest: if FPISDOSSHELL is set we are already running
+    inside a "DOS Shell" command spawned by an outer fp.exe. Starting
+    a second IDE on top would burn screen state, leak temp files, and
+    leave the user with two stacked instances. Tell them to exit first. }
+  if GetEnv(FPDosShellEnvVar)<>'' then
+    begin
+      writeln;
+      writeln(' You are already inside FP''s DOS Shell.');
+      writeln(' Type EXIT to return to the IDE.');
+      Halt(1);
+    end;
 
   { Process params before printing GDB version because of /G option }
   ProcessParams(true);
