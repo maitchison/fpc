@@ -2323,6 +2323,18 @@ begin
     remove this, or it should destroy the browser info when it's called. - BG }
 end;
 
+{ Hash-table-based pointer dictionary. Replaces an earlier
+  TSortedCollection-based implementation whose insert was O(n) per call
+  (sorted-array shift) and degenerated to O(n^2) total during
+  LoadBrowserCol when the on-disk pointer order happened to be near
+  reverse-sorted -- producing 30x load-time variance run-to-run on
+  ~17000-symbol projects. Chained hash gives O(1) amortized insert and
+  lookup regardless of key order. }
+const
+     PD_HASH_BITS = 14;
+     PD_HASH_SIZE = 1 shl PD_HASH_BITS;          { 16384 buckets }
+     PD_HASH_MASK = PD_HASH_SIZE - 1;
+
 type
      PPointerXRef = ^TPointerXRef;
      TPointerXRef = record
@@ -2330,78 +2342,100 @@ type
        DataPtr  : pointer;
      end;
 
-     PPointerDictionary = ^TPointerDictionary;
-     TPointerDictionary = object(TSortedCollection)
-       function  At(Index: sw_Integer): PPointerXRef;
-       function  Compare(Key1, Key2: Pointer): sw_Integer; virtual;
-       procedure FreeItem(Item: Pointer); virtual;
-       function  SearchXRef(PtrValue: pointer): PPointerXRef;
-       function  AddPtr(PtrValue, DataPtr: pointer): PPointerXRef;
-       procedure Resolve(var P);
+     PPointerXRefNode = ^TPointerXRefNode;
+     TPointerXRefNode = record
+       Xref : TPointerXRef;
+       Next : PPointerXRefNode;
      end;
 
-function NewPointerXRef(APtrValue, ADataPtr: pointer): PPointerXRef;
-var P: PPointerXRef;
+     TPointerXRefBuckets = array[0..PD_HASH_SIZE-1] of PPointerXRefNode;
+     PPointerXRefBuckets = ^TPointerXRefBuckets;
+
+     PPointerDictionary = ^TPointerDictionary;
+     TPointerDictionary = object
+       Buckets : PPointerXRefBuckets;
+       Count   : sw_integer;
+       constructor Init(ALimit, ADelta: sw_integer);
+       destructor  Done;
+       function    SearchXRef(PtrValue: pointer): PPointerXRef;
+       function    AddPtr(PtrValue, DataPtr: pointer): PPointerXRef;
+       procedure   Resolve(var P);
+     end;
+
+function PointerHash(P: pointer): word;
+var u: longword;
 begin
-  New(P); FillChar(P^,SizeOf(P^),0);
-  with P^ do begin PtrValue:=APtrValue; DataPtr:=ADataPtr; end;
-  NewPointerXRef:=P;
+  { Knuth multiplicative hash with the 32-bit golden-ratio constant.
+    Take the top PD_HASH_BITS bits of the (wrapping) product. i386
+    only: relies on PtrUInt being 32 bits wide. }
+  u:=longword(PtrUInt(P))*longword($9E3779B1);
+  PointerHash:=word(u shr (32-PD_HASH_BITS));
 end;
 
-procedure DisposePointerXRef(P: PPointerXRef);
+constructor TPointerDictionary.Init(ALimit, ADelta: sw_integer);
 begin
-  if Assigned(P) then Dispose(P);
+  { ALimit/ADelta kept for API compat with the prior sorted-collection
+    constructor; ignored -- table is fixed size. }
+  GetMem(Buckets, sizeof(TPointerXRefBuckets));
+  FillChar(Buckets^, sizeof(TPointerXRefBuckets), 0);
+  Count:=0;
 end;
 
-function TPointerDictionary.At(Index: sw_Integer): PPointerXRef;
+destructor TPointerDictionary.Done;
+var I: longint;
+    Node, NextNode: PPointerXRefNode;
 begin
-  At:=inherited At(Index);
-end;
-
-function TPointerDictionary.Compare(Key1, Key2: Pointer): sw_Integer;
-var K1: PPointerXRef absolute Key1;
-    K2: PPointerXRef absolute Key2;
-    R: integer;
-begin
-  if PtrUInt(K1^.PtrValue)<PtrUInt(K2^.PtrValue) then R:=-1 else
-  if PtrUInt(K1^.PtrValue)>PtrUInt(K2^.PtrValue) then R:= 1 else
-  R:=0;
-  Compare:=R;
-end;
-
-procedure TPointerDictionary.FreeItem(Item: Pointer);
-begin
-  if Assigned(Item) then DisposePointerXRef(Item);
+  if Buckets<>nil then
+    begin
+      for I:=0 to PD_HASH_SIZE-1 do
+        begin
+          Node:=Buckets^[I];
+          while Node<>nil do
+            begin
+              NextNode:=Node^.Next;
+              Dispose(Node);
+              Node:=NextNode;
+            end;
+        end;
+      FreeMem(Buckets, sizeof(TPointerXRefBuckets));
+      Buckets:=nil;
+    end;
 end;
 
 function TPointerDictionary.SearchXRef(PtrValue: pointer): PPointerXRef;
-var P: PPointerXRef;
-    T: TPointerXRef;
-    Index: sw_integer;
+var Node: PPointerXRefNode;
 begin
-  T.PtrValue:=PtrValue;
-  if Search(@T,Index)=false then P:=nil else
-    P:=At(Index);
-  SearchXRef:=P;
+  Node:=Buckets^[PointerHash(PtrValue)];
+  while (Node<>nil) and (Node^.Xref.PtrValue<>PtrValue) do
+    Node:=Node^.Next;
+  if Node=nil then SearchXRef:=nil
+              else SearchXRef:=@Node^.Xref;
 end;
 
 function TPointerDictionary.AddPtr(PtrValue, DataPtr: pointer): PPointerXRef;
-var P: PPointerXRef;
+var Bucket: word;
+    Node:   PPointerXRefNode;
 begin
-  P:=SearchXRef(PtrValue);
-  if P=nil then
+  Bucket:=PointerHash(PtrValue);
+  Node:=Buckets^[Bucket];
+  while (Node<>nil) and (Node^.Xref.PtrValue<>PtrValue) do
+    Node:=Node^.Next;
+  if Node<>nil then
     begin
-      P:=NewPointerXRef(PtrValue,DataPtr);
-      Insert(P);
 {$ifdef DEBUG}
-    end
-  else
-    begin
-      if P^.DataPtr<>DataPtr then
+      if Node^.Xref.DataPtr<>DataPtr then
         InternalError(987654);
 {$endif DEBUG}
+      AddPtr:=@Node^.Xref;
+      exit;
     end;
-  AddPtr:=P;
+  New(Node);
+  Node^.Xref.PtrValue:=PtrValue;
+  Node^.Xref.DataPtr:=DataPtr;
+  Node^.Next:=Buckets^[Bucket];
+  Buckets^[Bucket]:=Node;
+  inc(Count);
+  AddPtr:=@Node^.Xref;
 end;
 
 procedure TPointerDictionary.Resolve(var P);
