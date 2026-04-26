@@ -1001,6 +1001,14 @@ begin
         cmCommandSetChanged : Update;
         cmUpdate            : Update;
       end;
+    evKeyDown :
+      { While a code editor has a WordStar prefix pending (Ctrl-K, Ctrl-Q,
+        Ctrl-O), let the next keystroke fall through to the focused editor
+        instead of being snatched by the menu bar's preprocess hot-key
+        lookup. Without this, Ctrl-K Ctrl-U fires the Ctrl+U menu shortcut
+        (Open by Name) instead of unindenting, etc. }
+      if EditorPrefixKeyActive then
+        Exit;
   end;
   inherited HandleEvent(Event);
 end;
