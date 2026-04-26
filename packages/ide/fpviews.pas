@@ -463,6 +463,7 @@ function  NewTabDef(AName: string; ADefItem: PView; AItems: PTabItem; ANext: PTa
 procedure DisposeTabDef(P: PTabDef);
 
 function GetEditorCurWord(Editor: PEditor; ValidSpecChars: TCharSet): string;
+procedure FlashEditorStatus(const S: string);
 procedure InitReservedWords;
 procedure DoneReservedWords;
 function GetReservedWordCount: integer;
@@ -577,7 +578,7 @@ uses
   {$ifdef S3PROBE}S3Modes,{$endif}
   FPSymbol,FPDebug,FPVars,FPUtils,FPCompil,FPHelp,
   FPTools,FPIDE,FPCodTmp,FPCodCmp,
-  FPDefIdx,FPNavStk,FPPeek;
+  FPDefIdx,FPNavStk,FPPeek,FPDeclImpl;
 
 const
   RSourceEditor: TStreamRec = (
@@ -2307,6 +2308,10 @@ begin
             Message(@Self,evCommand,cmNavBack,nil);
           kbAltRight :
             Message(@Self,evCommand,cmNavForward,nil);
+          kbAltUp :
+            DeclImplJumpUp(@Self);
+          kbAltDown :
+            DeclImplJumpDown(@Self);
         else DontClear:=true;
         end;
         if not DontClear then ClearEvent(Event);
