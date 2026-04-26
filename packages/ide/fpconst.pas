@@ -233,7 +233,12 @@ const
 
      cmPrint             = 248;
      cmSymPrevious       = 249; {previous symbol browser window}
-     cmFindInFiles       = 250; {global Find in Files (Ctrl+Shift+F)}
+     {250 = cmCommentSel, 251 = cmUnCommentSel (defined in wviews.pas);
+      reserved here so future renumbers don't collide.}
+     cmFindInFiles       = 252; {global Find in Files (Ctrl+Shift+F)}
+     cmJumpToAsm         = 253; {Search | Jump to asm source (Alt+A);
+                                 must be <=255 so EditorCmds can disable
+                                 it when no source window is focused.}
 
      cmNotImplemented    = 1000;
      cmNewFromTemplate   = 1001;
@@ -318,7 +323,8 @@ const
      cmDebuggerStopped   = 2600;
      cmDisassemble       = 2601;
      cmContinue          = 2602;
-     cmJumpToAsm         = 2603;
+     {2603 was cmJumpToAsm; moved to 253 so it can participate in the
+      EditorCmds enable/disable set (TCommandSet = SET OF Byte).}
 
      cmSymBrowse         = 2700;
      cmSymGotoSource     = 2701;
