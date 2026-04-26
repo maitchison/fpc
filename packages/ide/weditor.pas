@@ -631,6 +631,8 @@ type
    {a}function    GetSpecSymbol(SpecClass: TSpecSymbolClass; Index: integer): pstring; virtual;
    {a}function    IsReservedWord(const S: string): boolean; virtual;
    {a}function    IsAsmReservedWord(const S: string): boolean; virtual;
+      function    HashIsSymbol: boolean; virtual;
+      function    ClassifyAsmToken(const W: string; LeadCh: AnsiChar): byte; virtual;
     public
      { CodeTemplate support }
    {a}function    TranslateCodeTemplate(var Shortcut: string; ALines: PUnsortedStringCollection): boolean; virtual;
@@ -2505,7 +2507,12 @@ var
     else if C in {$ifdef USE_UNTYPEDSET}[#9]{$else}TabChars{$endif} then
       CC:=ccTab
     else if C in {$ifdef USE_UNTYPEDSET}['#']{$else}HashChars{$endif} then
-      CC:=ccHash
+      begin
+        if Editor^.HashIsSymbol then
+          CC:=ccSymbol
+        else
+          CC:=ccHash;
+      end
     else if (LastCC=ccHexNumber) and (C in {$ifdef USE_UNTYPEDSET}['0'..'9','A'..'F','a'..'f']{$else}HexNumberChars{$endif}) then
       CC:=ccHexNumber
     else if C in {$ifdef USE_UNTYPEDSET}['0'..'9']{$else}NumberChars{$endif} then
@@ -2537,6 +2544,8 @@ var
   procedure FormatWord(SClass: TCharClass; StartX:Sw_integer;EndX: Sw_integer);
   var
       C: byte;
+      AsmCls: byte;
+      LeadCh: AnsiChar;
       WordS: string; {Note: leave for now as ShortString}
   begin
     C:=0;
@@ -2570,10 +2579,29 @@ var
         C:=coSymbolColor;
       ccAlpha :
         begin
-          if Editor^.IsReservedWord(WordS) then
-            C:=coReservedWordColor
+          if StartX>1 then
+            LeadCh:=LineText[StartX-1]
           else
-            C:=coIdentifierColor;
+            LeadCh:=' ';
+          AsmCls:=Editor^.ClassifyAsmToken(WordS,LeadCh);
+          case AsmCls of
+            1: C:=coNumberColor;        { register }
+            2: begin                    { dim asm directive }
+                 C:=coCommentColor;
+                 if (StartX>1) and (StartX-1<=Length(Format)) then
+                   Format[StartX-1]:=chr(C);
+               end;
+            3: begin                    { bright asm directive }
+                 C:=coReservedWordColor;
+                 if (StartX>1) and (StartX-1<=Length(Format)) then
+                   Format[StartX-1]:=chr(C);
+               end;
+          else
+            if Editor^.IsReservedWord(WordS) then
+              C:=coReservedWordColor
+            else
+              C:=coIdentifierColor;
+          end;
         end;
     end;
     if EndX+1>=StartX then
@@ -3587,6 +3615,23 @@ begin
   IsAsmReservedWord:=false;
 end;
 
+function TCustomCodeEditor.HashIsSymbol: boolean;
+begin
+  { Pascal default: '#' starts a char-code (#65, #13#10) and is its own
+    char class. Override to true for syntaxes that use '#' as a comment
+    or other regular symbol. }
+  HashIsSymbol:=false;
+end;
+
+function TCustomCodeEditor.ClassifyAsmToken(const W: string; LeadCh: AnsiChar): byte;
+begin
+  { 0 = no asm-specific handling
+    1 = register (e.g. eax, mm0, xmm15)
+    2 = dim directive (.balign, .byte, .long, .ascii, ...)
+    3 = bright directive (.section, .text, .data, .global, .globl) }
+  ClassifyAsmToken:=0;
+end;
+
 function TCustomCodeEditor.TranslateCodeTemplate(var Shortcut: string; ALines: PUnsortedStringCollection): boolean;
 begin
   { Abstract }
@@ -4379,7 +4424,7 @@ begin
              if X<=length(Format) then
                {Color:=ColorTab[ord(Format[X])] else Color:=ColorTab[coTextColor];
                  this give BoundsCheckError with -Cr quite often PM }
-               Color:=ColorTab[ord(Format[X]) mod (coLastColor + 1)] else Color:=ColorTab[coWhiteSpaceColor];
+               Color:=ColorTab[ord(Format[X]) mod (coLastColor + 1)] else Color:=ColorTab[coTextColor];
 
             if IsFlagSet(efHighlightRow) and
                (PX.Y=CurPos.Y) then
