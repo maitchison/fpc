@@ -539,7 +539,14 @@ function SetVESAMode(const VideoMode: TVideoMode): Boolean;
                     DoCustomMouse(false)
                   else
 {$endif TESTGRAPHIC}
-                    DoCustomMouse(true);
+                    begin
+                      { Wide text modes (132x50, 132x60, ...) often use a
+                        smaller font than 80x25, but the RTL only sampled
+                        the cell height at SysInitVideo. Re-query so the
+                        cursor is sized for the new font. }
+                      Video.RefreshCursorMetrics;
+                      DoCustomMouse(true);
+                    end;
                end;
            end;
          if res then
