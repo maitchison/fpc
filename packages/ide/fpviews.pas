@@ -4425,6 +4425,29 @@ function IOpenEditorWindow(Bounds: PRect; FileName: string; CurX,CurY: sw_intege
 var R: TRect;
     W: PSourceWindow;
 begin
+  { If a window already exists for this file, focus it instead of opening
+    a duplicate. Empty FileName means File|New / NewFromTemplate, which
+    legitimately want a fresh untitled window. }
+  if FileName<>'' then
+    begin
+      W:=SearchOnDesktop(FileName,false);
+      if W<>nil then
+        begin
+          if (CurX<>0) or (CurY<>0) then
+            with W^.Editor^ do
+            begin
+              SetCurPtr(CurX,CurY);
+              TrackCursor(do_centre);
+            end;
+          if ShowIt then
+            begin
+              W^.Show;
+              W^.Select;
+            end;
+          IOpenEditorWindow:=W;
+          exit;
+        end;
+    end;
   if Assigned(Bounds) then R.Copy(Bounds^) else
     GetNextEditorBounds(R);
   PushStatus(FormatStrStr(msg_openingsourcefile,SmartPath(FileName)));

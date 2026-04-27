@@ -7,6 +7,22 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.17 / Compiler 3.3.3 ==
+
+IDE
+  * File|Open, File|Open Recent, and OpenSearch no longer
+    open a second editor window when the file is already
+    open on the desktop -- the existing window is focused
+    instead. Previously each open created a fresh window,
+    so the same file could end up loaded several times in
+    parallel with diverging unsaved edits. Navigation paths
+    (Ctrl+Enter go-to-def, nav stack, command-line args,
+    find-in-files results, breakpoints) already deduped;
+    this brings the menu paths into line. File|New and
+    File|New From Template still create fresh untitled
+    windows.
+
+
 == IDE 1.0.16 / Compiler 3.3.3 ==
 
 IDE
