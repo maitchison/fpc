@@ -69,18 +69,23 @@ type
   end;
 
   TQuickOpenDialog = object(TCenterDialog)
-    AllItems   : PQuickOpenOwnedList;
-    Input      : PQuickOpenInput;
-    MaskInput  : PQuickOpenMaskInput;
-    ListBox    : PQuickOpenListBox;
-    Counts     : PStaticText;
-    TotalCount : Sw_Integer;
+    AllItems    : PQuickOpenOwnedList;
+    WideItems   : PQuickOpenOwnedList;   { mask-ignoring corpus, lazy }
+    WideScanned : boolean;
+    Input       : PQuickOpenInput;
+    MaskInput   : PQuickOpenMaskInput;
+    ListBox     : PQuickOpenListBox;
+    Counts      : PStaticText;
+    TotalCount  : Sw_Integer;
+    FallbackPath: string;                { set by Enter-as-literal-path fallback }
     constructor Init;
     destructor  Done; virtual;
     procedure   HandleEvent(var Event: TEvent); virtual;
     procedure   ScanCorpus;
+    procedure   ScanWideCorpus;
     procedure   Refilter;
     function    ChosenPath: string;
+    function    TryResolveLiteralPath(const Q: string; var FullOut: string): boolean;
   end;
 
 {----------------------------------------------------------------}
@@ -355,11 +360,14 @@ begin
   inherited Init(R, dialog_openbyname);
   HelpCtx := hcOpenByName;
   AllItems := nil;
+  WideItems := nil;
+  WideScanned := false;
   Input    := nil;
   MaskInput:= nil;
   ListBox  := nil;
   Counts   := nil;
   TotalCount := 0;
+  FallbackPath := '';
 
   GetExtent(R);
   R.Grow(-2, -1);
@@ -415,9 +423,16 @@ begin
     Dispose(AllItems, Done);
     AllItems := nil;
   end;
+  if WideItems <> nil then
+  begin
+    Dispose(WideItems, Done);
+    WideItems := nil;
+  end;
 end;
 
 procedure TQuickOpenDialog.HandleEvent(var Event: TEvent);
+var
+  q, resolved: string;
 begin
   if (Event.What = evKeyDown) and (Event.KeyCode = kbEnter) then
   begin
@@ -426,14 +441,25 @@ begin
       ClearEvent(Event);
       EndModal(cmOK);
       exit;
-    end
-    else
-    begin
-      { Nothing to pick — swallow the Enter so TDialog doesn't
-        broadcast cmDefault to something unrelated. }
-      ClearEvent(Event);
-      exit;
     end;
+    { No match in the listbox. If the query looks like a filename
+      (contains a '.'), try to resolve it directly so files filtered
+      out by the IncludeMask -- e.g. play.log -- can still be opened. }
+    if Input <> nil then
+    begin
+      if Input^.Data <> nil then q := Input^.Data^ else q := '';
+      if (Pos('.', q) > 0) and TryResolveLiteralPath(q, resolved) then
+      begin
+        FallbackPath := resolved;
+        ClearEvent(Event);
+        EndModal(cmOK);
+        exit;
+      end;
+    end;
+    { Nothing to pick — swallow the Enter so TDialog doesn't
+      broadcast cmDefault to something unrelated. }
+    ClearEvent(Event);
+    exit;
   end;
   inherited HandleEvent(Event);
 end;
@@ -450,11 +476,13 @@ begin
     end;
 end;
 
-{ Scan a single directory for Pascal source files and append to AllItems.
+{ Scan a single directory for source files and append to AllItems.
   Directory must already be normalised (no trailing slash). Skips items
-  whose absolute path is already in 'seen'. }
+  whose absolute path is already in 'seen'. When MatchAll is true the
+  IncludeMask is ignored — used to populate the wide corpus that backs
+  Enter-as-literal-path lookup (e.g. play.log). }
 procedure QOScanDir(const Dir: string; Items: PQuickOpenOwnedList;
-                    Seen: PUnsortedStringCollection);
+                    Seen: PUnsortedStringCollection; MatchAll: boolean);
 var
   sr       : SearchRec;
   rc       : integer;
@@ -472,7 +500,7 @@ begin
   while rc = 0 do
   begin
     if (sr.Attr and Directory) = 0 then
-      if QOMatchesMask(sr.Name) then
+      if MatchAll or QOMatchesMask(sr.Name) then
       begin
         base := sr.Name;
         full := FExpand(normDir + '\' + base);
@@ -506,7 +534,7 @@ end;
 
 { Split a semicolon-separated path list and scan each directory. }
 procedure QOScanList(const Paths: string; Items: PQuickOpenOwnedList;
-                     Seen: PUnsortedStringCollection);
+                     Seen: PUnsortedStringCollection; MatchAll: boolean);
 var
   i, j, lm: Sw_Integer;
   piece: string;
@@ -523,7 +551,7 @@ begin
     while (Length(piece) > 0) and (piece[Length(piece)] = ' ') do
       Delete(piece, Length(piece), 1);
     if piece <> '' then
-      QOScanDir(FExpand(piece), Items, Seen);
+      QOScanDir(FExpand(piece), Items, Seen, MatchAll);
     i := j + 1;
   end;
 end;
@@ -545,13 +573,112 @@ begin
     projDir := DirOf(FExpand(PrimaryFile))
   else
     GetDir(0, projDir);
-  QOScanDir(TrimEndSlash(projDir), AllItems, seen);
+  QOScanDir(TrimEndSlash(projDir), AllItems, seen, false);
 
   { 2. -Fu / -Fi + SourceDirs }
-  QOScanList(GetSourceDirectories, AllItems, seen);
+  QOScanList(GetSourceDirectories, AllItems, seen, false);
 
   Dispose(seen, Done);
   TotalCount := AllItems^.Count;
+end;
+
+{ Wide corpus: same dirs as ScanCorpus but ignores QuickOpenRec.IncludeMask,
+  so files like play.log show up. Built lazily on the first keystroke that
+  introduces a '.' into the query, then reused. Disposed in Done. }
+procedure TQuickOpenDialog.ScanWideCorpus;
+var
+  seen    : PUnsortedStringCollection;
+  projDir : string;
+begin
+  if WideItems <> nil then
+  begin
+    Dispose(WideItems, Done);
+    WideItems := nil;
+  end;
+  New(WideItems, Init(64, 64));
+  New(seen, Init(64, 64));
+
+  if PrimaryFile <> '' then
+    projDir := DirOf(FExpand(PrimaryFile))
+  else
+    GetDir(0, projDir);
+  QOScanDir(TrimEndSlash(projDir), WideItems, seen, true);
+  QOScanList(GetSourceDirectories, WideItems, seen, true);
+
+  Dispose(seen, Done);
+  WideScanned := true;
+end;
+
+{ Resolve Q against the same dirs as the wide corpus. Returns the absolute
+  path of the first existing file whose basename literally equals Q (or
+  whose absolute/relative form matches). Used as a fallback when the user
+  presses Enter on a query containing '.' that has no matches in the
+  listbox -- e.g. typing 'play.log' on an IDE configured with the default
+  *.pas;*.inc;... mask. }
+function TQuickOpenDialog.TryResolveLiteralPath(const Q: string;
+                                                var FullOut: string): boolean;
+var
+  candidate : string;
+  projDir   : string;
+  paths     : string;
+  i, j, lm  : Sw_Integer;
+  piece     : string;
+begin
+  TryResolveLiteralPath := false;
+  FullOut := '';
+  if Q = '' then exit;
+
+  { Absolute path or path relative to cwd. }
+  candidate := FExpand(Q);
+  if ExistsFile(candidate) then
+  begin
+    FullOut := candidate;
+    TryResolveLiteralPath := true;
+    exit;
+  end;
+
+  { Project / primary-file directory. }
+  if PrimaryFile <> '' then
+  begin
+    projDir := TrimEndSlash(DirOf(FExpand(PrimaryFile)));
+    if projDir <> '' then
+    begin
+      candidate := FExpand(projDir + '\' + Q);
+      if ExistsFile(candidate) then
+      begin
+        FullOut := candidate;
+        TryResolveLiteralPath := true;
+        exit;
+      end;
+    end;
+  end;
+
+  { -Fu / -Fi + SourceDirs, semicolon-separated. }
+  paths := GetSourceDirectories;
+  lm := Length(paths);
+  i := 1;
+  while i <= lm do
+  begin
+    j := i;
+    while (j <= lm) and (paths[j] <> ';') do Inc(j);
+    piece := Copy(paths, i, j - i);
+    { Qualify System.Delete -- inside this method 'Delete' would resolve
+      to TGroup.Delete(PView) and fail to overload. }
+    while (Length(piece) > 0) and (piece[1] = ' ') do System.Delete(piece, 1, 1);
+    while (Length(piece) > 0) and (piece[Length(piece)] = ' ') do
+      System.Delete(piece, Length(piece), 1);
+    if piece <> '' then
+    begin
+      candidate := FExpand(TrimEndSlash(FExpand(piece)) + '\' + Q);
+      if ExistsFile(candidate) then
+      begin
+        FullOut := candidate;
+        TryResolveLiteralPath := true;
+        exit;
+      end;
+    end;
+    i := j + 1;
+  end;
 end;
 
 { Insertion sort the filter list in place. Ascending by
@@ -608,7 +735,7 @@ end;
 
 procedure TQuickOpenDialog.Refilter;
 var
-  q         : string;
+  q, qRaw   : string;
   i         : Sw_Integer;
   item      : PQuickOpenItem;
   keep      : boolean;
@@ -616,25 +743,50 @@ var
   filt      : PQuickOpenFilterList;
   shown, tot: Sw_Integer;
   status    : string;
+  byName    : boolean;
+  source    : PQuickOpenOwnedList;
+  nameUp    : string;
 begin
-  if (AllItems = nil) or (ListBox = nil) or (Counts = nil) or (Input = nil) then
+  if (ListBox = nil) or (Counts = nil) or (Input = nil) then
     exit;
   if Input^.Data <> nil then
-    q := QOUpper(Input^.Data^)
+    qRaw := Input^.Data^
   else
-    q := '';
+    qRaw := '';
+  q := QOUpper(qRaw);
+
+  { A '.' in the query means the user is typing a literal filename
+    (e.g. 'play.log'). Switch to a mask-ignoring corpus and match
+    against the full basename instead of the stem. }
+  byName := Pos('.', qRaw) > 0;
+  if byName then
+  begin
+    if not WideScanned then ScanWideCorpus;
+    source := WideItems;
+  end
+  else
+    source := AllItems;
+  if source = nil then exit;
 
   New(filt, Init(32, 64));
-  for i := 0 to AllItems^.Count - 1 do
+  for i := 0 to source^.Count - 1 do
   begin
-    item := PQuickOpenItem(AllItems^.At(i));
+    item := PQuickOpenItem(source^.At(i));
     if item = nil then continue;
     keep := false;
     score := 0;
     if q = '' then
     begin
       keep := true;
-      score := 0;
+    end
+    else if byName then
+    begin
+      if item^.DisplayName <> nil then
+        nameUp := QOUpper(item^.DisplayName^)
+      else
+        nameUp := '';
+      if QOHasPrefix(q, nameUp) then
+        keep := true;
     end
     else if (item^.KeyA <> nil) and QOHasPrefix(q, item^.KeyA^) then
     begin
@@ -657,7 +809,10 @@ begin
   QOSortFilter(filt);
 
   shown := filt^.Count;
-  tot   := TotalCount;
+  if byName then
+    tot := source^.Count
+  else
+    tot := TotalCount;
 
   ListBox^.NewList(filt);
   if shown > 0 then ListBox^.FocusItem(0);
@@ -686,6 +841,11 @@ var
   p   : PQuickOpenItem;
 begin
   ChosenPath := '';
+  if FallbackPath <> '' then
+  begin
+    ChosenPath := FallbackPath;
+    exit;
+  end;
   if (ListBox = nil) or (ListBox^.List = nil) then exit;
   lst := ListBox^.List;
   idx := ListBox^.Focused;

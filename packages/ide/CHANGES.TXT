@@ -10,6 +10,14 @@ dir).
 == IDE 1.0.17 / Compiler 3.3.3 ==
 
 IDE
+  * Quick-Open (Ctrl+U): typing a '.' in the filter switches
+    to a mask-ignoring corpus and matches against the full
+    basename, so files outside the IncludeMask (e.g. play.log)
+    show up as you type. Pressing Enter on a query containing
+    a '.' that has no listbox match resolves the literal text
+    against the project dir + every -Fu/-Fi search dir and
+    opens it if found -- so 'play.log' loads even when the
+    mask only covers Pascal sources.
   * File|Open, File|Open Recent, and OpenSearch no longer
     open a second editor window when the file is already
     open on the desktop -- the existing window is focused
