@@ -7,6 +7,41 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.18 / Compiler 3.3.4 ==
+
+Compiler
+  * New syntax: `var x: T align N;` for static globals. Lets a single
+    declaration request stricter alignment than the target's
+    varalignmax cap. Plumbed through tstaticvarsym.varalign and
+    folded into the existing explicitalign path in
+    ngenutil.insertbssdata, so the BSS slot is emitted at >= N
+    even when N > target_info.alignment.varalignmax. Useful for
+    MMX/SSE scratch globals on go32v2 that need 8/16-byte
+    alignment without a getmem-and-align dance:
+
+        var mmreg : qword align 8;
+        var sse_buf : array[0..3] of single align 16;
+
+    N must be a power of two in 1..128. Locals/parameters are
+    silently ignored (the prologue does not realign ESP).
+
+  * Initialised vars (`var x: T align N = init;`) now produce a
+    parse-time error with a hint when N exceeds the target's
+    typed-const cap (constalignmax = 4 on go32v2):
+
+        Error: `align 8` on initialised "x" exceeds target
+        typed-const cap (4); declare BSS and assign in initialization.
+
+    The cap is a DJGPP COFF object-format limitation -- per-symbol
+    section alignment is encoded in only 2 bits, so a `.balign 8`
+    inside `.data.n_<sym>` is silently clamped to 4 by the linker.
+    The error catches it instead of letting it look correct but
+    be wrong.
+
+  * PPU long-version bumped 30 -> 31 (staticvarsym format gained
+    a varalign byte). All units must be rebuilt.
+
+
 == IDE 1.0.17 / Compiler 3.3.3 ==
 
 IDE
