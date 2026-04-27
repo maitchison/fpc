@@ -403,7 +403,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
 
                 { short cut entries in menu }
                 menu_key_file_open     = 'F3';
-                menu_key_file_openbyname='Ctrl+U';
+                menu_key_file_openbyname='Ctrl+N';
                 menu_key_file_save     = 'F2';
                 menu_key_file_exit     = 'Alt+X';
 
@@ -945,7 +945,7 @@ begin
       NewItem(menu_file_new,'',kbNoKey,cmNew,hcNew,
       NewItem(menu_file_template,'',kbNoKey,cmNewFromTemplate,hcNewFromTemplate,
       NewItem(menu_file_open,menu_key_file_open,kbF3,cmOpen,hcOpen,
-      NewItem(menu_file_openbyname,menu_key_file_openbyname,kbCtrlU,cmOpenByName,hcOpenByName,
+      NewItem(menu_file_openbyname,menu_key_file_openbyname,kbCtrlN,cmOpenByName,hcOpenByName,
       NewItem(menu_file_reload,'',kbNoKey,cmDoReload,hcDoReload,
       NewItem(menu_file_save,menu_key_file_save,kbF2,cmSave,hcSave,
       NewItem(menu_file_saveas,'',kbNoKey,cmSaveAs,hcSaveAs,

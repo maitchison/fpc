@@ -905,7 +905,7 @@ const
     Ord(^F), cmWordRight, Ord(^G), cmDelChar,
     Ord(^H), cmBackSpace, Ord(^J), cmExpandCodeTemplate,
     Ord(^K), $FF02, Ord(^L), cmSearchAgain,
-    Ord(^M), cmNewLine, Ord(^N), cmBreakLine,
+    Ord(^M), cmNewLine, Ord(^I), cmBreakLine,
     Ord(^O), $FF03,
     Ord(^P), cmASCIIChar, Ord(^Q), $FF01,
     Ord(^R), cmPageUp, Ord(^S), cmCharLeft,
