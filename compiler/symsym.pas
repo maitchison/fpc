@@ -328,6 +328,11 @@ interface
             to the symbol of the corresponding class field }
           fieldvarsym : tfieldvarsym;
           fieldvarsymderef : tderef;
+          { explicit user-requested alignment (power of two, 1..128); 0 = unset.
+            Set by `var x: T align N;` syntax in pdecvar.pas, honoured in
+            ngenutil.insertbssdata so the BSS slot is emitted at >= varalign,
+            bypassing target_info.alignment.varalignmax. }
+          varalign : shortint;
           constructor create(const n : TSymStr;vsp:tvarspez;def:tdef;vopts:tvaroptions);virtual;
           constructor create_dll(const n : TSymStr;vsp:tvarspez;def:tdef);virtual;
           constructor create_C(const n: TSymStr; const mangled : TSymStr;vsp:tvarspez;def:tdef);virtual;
@@ -2234,6 +2239,7 @@ implementation
       begin
          inherited create(staticvarsym,n,vsp,def,vopts);
          fieldvarsymderef.reset;
+         varalign:=0;
 {$ifdef symansistr}
          _mangledname:='';
 {$else symansistr}
@@ -2279,6 +2285,7 @@ implementation
          if vo_has_section in varoptions then
            section:=ppufile.getansistring;
          ppufile.getderef(fieldvarsymderef);
+         varalign:=shortint(ppufile.getbyte);
          ppuload_platform(ppufile);
       end;
 
@@ -2317,6 +2324,7 @@ implementation
          if vo_has_section in varoptions then
            ppufile.putansistring(section);
          ppufile.putderef(fieldvarsymderef);
+         ppufile.putbyte(byte(varalign));
          writeentry(ppufile,ibstaticvarsym);
       end;
 

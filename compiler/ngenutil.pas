@@ -975,6 +975,10 @@ implementation
         explicitalign:=tabstractrecordsymtable(tabstractrecorddef(sym.vardef).symtable).explicitrecordalignment
       else
         explicitalign:=0;
+      { `var x: T align N;` — promote explicitalign so the BSS slot honours
+        the user's request even when it exceeds target_info.varalignmax }
+      if sym.varalign>explicitalign then
+        explicitalign:=sym.varalign;
       if (wantedalign=0) then
         varalign:=var_align_size(l)
       else

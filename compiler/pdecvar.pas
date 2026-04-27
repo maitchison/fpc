@@ -1363,6 +1363,8 @@ implementation
          vs   : tabstractvarsym;
          hdef : tdef;
          i    : longint;
+         explicit_align : int64;
+         align_valcode  : integer;
          flags : thccflags;
          first,
          isgeneric,
@@ -1491,6 +1493,37 @@ implementation
                  read_public_and_external_sc(sc);
                  allowdefaultvalue:=false;
                  semicoloneaten:=true;
+               end;
+
+             { Optional explicit alignment: `var x: T align N;`
+               N is a power of two, 1..128. Stored on the staticvarsym and
+               honoured by ngenutil.insertbssdata, bypassing varalignmax.
+               Locals/parameters are silently ignored (the prologue cannot
+               guarantee >stackalign for them).
+               Read N straight from the _INTCONST token rather than via
+               get_intconst -- comp_expr would consume a following `=`
+               (ef_accept_equal) and swallow the typed-const initializer. }
+             if (current_scanner.token=_ID) and (current_scanner.pattern='ALIGN') then
+               begin
+                 consume(_ID);
+                 explicit_align:=0;
+                 align_valcode:=1;
+                 if current_scanner.token=_INTCONST then
+                   begin
+                     val(current_scanner.pattern,explicit_align,align_valcode);
+                     consume(_INTCONST);
+                   end;
+                 if (align_valcode<>0) or
+                    ((explicit_align and not int64($7F)) <> 0) or
+                    (PopCnt(byte(explicit_align)) <> 1) then
+                   message(scanner_e_illegal_alignment_directive)
+                 else
+                   for i:=0 to sc.count-1 do
+                     begin
+                       vs:=tabstractvarsym(sc[i]);
+                       if vs.typ=staticvarsym then
+                         tstaticvarsym(vs).varalign:=shortint(explicit_align);
+                     end;
                end;
 
              { try to parse the hint directives }
