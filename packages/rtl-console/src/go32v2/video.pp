@@ -24,6 +24,14 @@ interface
 var
   VideoSeg : word;
 
+{ Re-query BIOS for the current font's character-cell scan-line count and
+  re-apply the active cursor type. Call after any code path that switches
+  text modes outside SysSetVideoMode (e.g. the IDE's VESA / S3 mode set):
+  without this, SysSetCursorType keeps using the scan-line range from the
+  previously-active font and produces an oversized cursor when the new
+  mode has a smaller cell. }
+procedure RefreshCursorMetrics;
+
 
 implementation
 
@@ -217,6 +225,18 @@ begin
                  end;
   end;
   realintr($10,regs);
+end;
+
+procedure RefreshCursorMetrics;
+var
+  regs : trealregs;
+begin
+  regs.ax:=$1130;
+  regs.bx:=0;
+  realintr($10,regs);
+  if regs.cx > 0 then
+    MaxCursorLines := byte(regs.cx) - 1;
+  SysSetCursorType(SysGetCursorType);
 end;
 
 procedure SysUpdateScreen(Force: Boolean);
