@@ -379,6 +379,10 @@ implementation
                          status.verbosity:=status.verbosity and (not V_Executable)
                        else
                          status.verbosity:=status.verbosity or V_Executable;
+                 'Y' : if inverse then
+                         status.verbosity:=status.verbosity and (not V_Inline)
+                       else
+                         status.verbosity:=status.verbosity or V_Inline;
                  end;
                 inc(i);
              end;

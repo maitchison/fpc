@@ -255,6 +255,7 @@ const
       opt_usedtriedinfo = '~U~sed,tried info';
       opt_all = '~A~ll';
       opt_showallprocsonerror = 'Show all ~P~rocedures if error';
+      opt_inlinedetails = 'Inline d~e~tails';
       { Checking options }
       opt_rangechecking = '~R~ange checking';
       opt_stackchecking = '~S~tack checking';
@@ -1265,6 +1266,7 @@ begin
      AddBooleanItem(opt_usedtriedinfo,'ut',idNone);
      AddBooleanItem(opt_all,'a',idNone);
      AddBooleanItem(opt_showallprocsonerror,'b',idNone);
+     AddBooleanItem(opt_inlinedetails,'y',idNone);
    end;
   New(CodegenSwitches,Init('C'));
   with CodegenSwitches^ do

@@ -4846,13 +4846,13 @@ implementation
           begin
             if not tprocdef(procdefinition).has_inlininginfo then
               begin
-                Comment(V_lineinfo+V_Debug,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
                   '", body not stored (has_inlininginfo=false; check ppu / mode / parser_n_not_supported_for_inline)');
                 exit;
               end;
             if not heuristics_favors_inlining(nodecnt,nodelim) then
               begin
-                Comment(V_lineinfo+V_Debug,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
                   '", node count '+tostr(nodecnt)+' >= limit '+tostr(nodelim)+' at inline depth '+tostr(inlinelevel));
                 exit;
               end;
@@ -4867,7 +4867,7 @@ implementation
                (st.symtabletype=globalsymtable) and
                (not st.iscurrentunit) then
               begin
-                Comment(V_lineinfo+V_Debug,'Not inlining "'+tprocdef(procdefinition).procsym.realname+'", references private symbols from other unit');
+                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+'", references private symbols from other unit');
                 exclude(callnodeflags,cnf_do_inline);
               end;
             para:=tcallparanode(parameters);
@@ -4875,7 +4875,7 @@ implementation
               begin
                 if not para.can_be_inlined then
                   begin
-                    Comment(V_lineinfo+V_Debug,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                    Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
                       '", invocation parameter contains an unsafe/unsupported construct');
                     exclude(callnodeflags,cnf_do_inline);
                     break;

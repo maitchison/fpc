@@ -145,6 +145,7 @@ Const
   V_Debug        = $20000;
   V_Executable   = $40000;
   V_TimeStamps   = $80000;
+  V_Inline       = $100000;
   V_LevelMask    = $ffffff;
   V_All          = V_LevelMask;
   V_Default      = V_Fatal + V_Error + V_Normal;

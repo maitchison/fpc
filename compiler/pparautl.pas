@@ -620,9 +620,19 @@ implementation
                 { Give an error if inline is not supported by the compiler mode,
                   otherwise only give a hint that this procedure will not be inlined }
                 if not(m_default_inline in current_settings.modeswitches) then
-                  Message(parser_e_proc_inline_not_supported)
+                  begin
+                    Message(parser_e_proc_inline_not_supported);
+                    if (pd.typ=procdef) and assigned(tprocdef(pd).procsym) then
+                      Comment(V_lineinfo+V_Inline,'Stripping inline from "'+tprocdef(pd).procsym.realname+
+                        '" (mode does not support inline)');
+                  end
                 else
-                  Message(parser_h_inlining_disabled);
+                  begin
+                    Message(parser_h_inlining_disabled);
+                    if (pd.typ=procdef) and assigned(tprocdef(pd).procsym) then
+                      Comment(V_lineinfo+V_Inline,'Stripping inline from "'+tprocdef(pd).procsym.realname+
+                        '" (cs_do_inline off in localswitches; check {$inline off} or -Si-)');
+                  end;
                 exclude(pd.procoptions,po_inline);
               end;
 
