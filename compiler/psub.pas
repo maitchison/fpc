@@ -179,6 +179,7 @@ implementation
           include(procdef.implprocoptions,pio_inline_not_possible);
           Message1(parser_n_not_supported_for_inline,reason);
           Message(parser_h_inlining_disabled);
+          Comment(V_lineinfo+V_Inline,'Inline disabled for "'+procdef.procsym.realname+'": '+reason);
         end;
 
       var
