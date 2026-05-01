@@ -7,6 +7,26 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.19 / Compiler 3.3.5 ==
+
+Compiler
+  * Inline expansion now works for pure-asm `assembler; nostackframe;`
+    procedures. Previously any `pi_has_assembler_block` flag rejected
+    inlining outright; now `procedure foo; assembler; nostackframe;
+    inline; asm ... end;` with zero parameters and a void return type
+    is eligible. The body's tasmlist is round-tripped through PPU and
+    spliced at the call site without a `call`/`ret`. v1 rejects
+    parameters, non-void returns, named labels, symbol references in
+    operands, and operand kinds outside `top_reg`/`top_const`/`top_bool`/
+    clean `top_ref`. Functions and parameterised procs follow once the
+    register-coordination machinery is in place.
+  * x86 PPU format now serialises `taicpu.opsize` and the operand-order
+    flag. Without these, cross-unit inline expansion of asm bodies left
+    memory operands sized as `mem??`, breaking the matcher on
+    `addl $0,0(%esp)`-style barriers in the RTL once SYSTEMINLINE
+    activated the new asm-inline path. PPU long version bumped to 32.
+
+
 == IDE 1.0.18 / Compiler 3.3.4 ==
 
 Compiler

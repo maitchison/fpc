@@ -34,7 +34,8 @@ interface
       cpubase,
       cgbase,cgutils,
       aasmbase,aasmtai,aasmsym,
-      ogbase;
+      ogbase,
+      symtype;
 
     const
       { "mov reg,reg" source operand number }
@@ -644,6 +645,14 @@ interface
          FOperandOrder : TOperandOrder;
          procedure init(_size : topsize); { this need to be called by all constructor }
       public
+         { Round-trip the x86-specific opsize field through the PPU. The base
+           class doesn't know about it, so without these overrides taicpu
+           records loaded from another unit's inline body have opsize=S_NO --
+           the matcher then computes operand sizes as `mem??` and rejects the
+           instruction (e.g. `addl $0,0(%esp)` in cross-unit-inlined RTL
+           barriers). }
+         constructor ppuload(t:taitype;ppufile:tcompilerppufile);override;
+         procedure ppuwrite(ppufile:tcompilerppufile);override;
          { the next will reset all instructions that can change in pass 2 }
          procedure ResetPass1;override;
          procedure ResetPass2;override;
@@ -1980,6 +1989,22 @@ implementation
         end;
 
         result:=true;
+      end;
+
+
+    constructor taicpu.ppuload(t:taitype;ppufile:tcompilerppufile);
+      begin
+        inherited ppuload(t,ppufile);
+        opsize:=topsize(ppufile.getbyte);
+        FOperandOrder:=TOperandOrder(ppufile.getbyte);
+      end;
+
+
+    procedure taicpu.ppuwrite(ppufile:tcompilerppufile);
+      begin
+        inherited ppuwrite(ppufile);
+        ppufile.putbyte(byte(opsize));
+        ppufile.putbyte(byte(FOperandOrder));
       end;
 
 

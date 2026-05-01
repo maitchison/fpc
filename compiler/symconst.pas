@@ -474,7 +474,12 @@ type
     { compiled with fastmath enabled }
     pio_fastmath,
     { inline is forbidden (calls get_frame) }
-    pio_inline_forbidden
+    pio_inline_forbidden,
+    { pure-asm nostackframe routine that has been validated for inlining
+      (no labels, no symbol/local refs in operands) -- bypass the normal
+      pi_has_assembler_block reject and splice the tasmlist at the call
+      site. See psub.pas check_assembler_inline. }
+    pio_inline_asm
   );
   timplprocoptions = set of timplprocoption;
 
