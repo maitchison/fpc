@@ -172,6 +172,110 @@ implementation
        {$endif}
        ;
 
+    { Walks the proc body looking for asmnodes; checks every tai inside is
+      safe to splice into a caller. v1 rules: no labels (named or local), no
+      operands referencing locals/params, no symbol-bearing references or
+      constants. Returns true only if every asmnode found passes; an empty
+      walk (no asmnodes) also returns true. }
+    function asmnode_inline_safe(p: tasmnode): boolean;
+      var
+        hp : tai;
+        ai : tai_cpu_abstract;
+        i : longint;
+      begin
+        result:=true;
+        if asmnf_get_asm_position in p.asmnodeflags then
+          exit;
+        if not assigned(p.p_asm) then
+          exit;
+        hp:=tai(p.p_asm.first);
+        while assigned(hp) do
+          begin
+            case hp.typ of
+              ait_marker,
+              ait_force_line,
+              ait_regalloc,
+              ait_tempalloc,
+              ait_align,
+              ait_comment:
+                ;
+              ait_instruction:
+                begin
+                  ai:=tai_cpu_abstract(hp);
+                  for i:=0 to ai.ops-1 do
+                    begin
+                      { Reject locals + arch-specific operand kinds outright. }
+                      if ai.oper[i]^.typ in [top_none,top_reg,top_const,top_bool] then
+                        continue;
+                      if ai.oper[i]^.typ=top_ref then
+                        begin
+                          if (ai.oper[i]^.ref^.symbol<>nil) or
+                             (ai.oper[i]^.ref^.relsymbol<>nil) then
+                            exit(false);
+                        end
+                      else
+                        { top_local + any non-x86 operand kind not whitelisted above }
+                        exit(false);
+                    end;
+                end;
+              ait_const:
+                if tai_const(hp).sym<>nil then
+                  exit(false);
+            else
+              exit(false);
+            end;
+            hp:=tai(hp.next);
+          end;
+      end;
+
+
+    function gather_asmnode_check(var n: tnode; arg: pointer): foreachnoderesult;
+      var
+        ok : pboolean;
+      begin
+        result:=fen_true;
+        if n.nodetype=asmn then
+          begin
+            ok:=pboolean(arg);
+            if not asmnode_inline_safe(tasmnode(n)) then
+              begin
+                ok^:=false;
+                result:=fen_norecurse_false;
+              end;
+          end;
+      end;
+
+
+    { Returns true if current_procinfo's body looks like a pure-asm nostackframe
+      routine whose asm content is safe to splice into a caller. v1 scope:
+      pure-asm + nostackframe, no parameters, void return, body contains only
+      register/immediate operands. Functions and parameterised procs are
+      deferred until register-coordination machinery exists. }
+    function is_assembler_inlineable: boolean;
+      var
+        ok : boolean;
+        cpi : tcgprocinfo;
+      begin
+        result:=false;
+        if not (pi_is_assembler in current_procinfo.flags) then
+          exit;
+        if not (po_assembler in current_procinfo.procdef.procoptions) then
+          exit;
+        if not (po_nostackframe in current_procinfo.procdef.procoptions) then
+          exit;
+        cpi:=tcgprocinfo(current_procinfo);
+        if not assigned(cpi.code) then
+          exit;
+        if current_procinfo.procdef.maxparacount<>0 then
+          exit;
+        if not is_void(current_procinfo.procdef.returndef) then
+          exit;
+        ok:=true;
+        foreachnodestatic(cpi.code,@gather_asmnode_check,@ok);
+        result:=ok;
+      end;
+
+
     function checknodeinlining(procdef: tprocdef): boolean;
 
       procedure _no_inline(const reason: TMsgStr);
@@ -194,8 +298,12 @@ implementation
           exit;
         if pi_has_assembler_block in current_procinfo.flags then
           begin
-            _no_inline('assembler');
-            exit;
+            if not is_assembler_inlineable then
+              begin
+                _no_inline('assembler');
+                exit;
+              end;
+            include(procdef.implprocoptions,pio_inline_asm);
           end;
         if (pi_has_global_goto in current_procinfo.flags) or
            (pi_has_interproclabel in current_procinfo.flags) then
