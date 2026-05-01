@@ -88,7 +88,7 @@ interface
           procedure add_done_statement(n:tnode);
           procedure convert_carg_array_of_const;
           procedure order_parameters;
-          function heuristics_favors_inlining:boolean;
+          function heuristics_favors_inlining(out nodecnt,limit:cardinal):boolean;
           procedure check_inlining;
           function  pass1_normal:tnode;
           procedure register_created_object_types;
@@ -4810,9 +4810,7 @@ implementation
       end;
 
 
-    function tcallnode.heuristics_favors_inlining:boolean;
-      var
-        limExcluding: cardinal;
+    function tcallnode.heuristics_favors_inlining(out nodecnt,limit:cardinal):boolean;
       begin
         {  Prevent too deep inlining recursion and code bloat by inlining
 
@@ -4829,22 +4827,35 @@ implementation
               if the outer nodes are in a seldomly used code path
             - The code avoids to use functions from the math unit
         }
-        limExcluding:=round(exp((1.0/(inlinelevel/3.0+1))*ln(10000)));
-        result:=node_count(tprocdef(procdefinition).inlininginfo^.code,limExcluding)<limExcluding;
+        limit:=round(exp((1.0/(inlinelevel/3.0+1))*ln(10000)));
+        nodecnt:=node_count(tprocdef(procdefinition).inlininginfo^.code,limit);
+        result:=nodecnt<limit;
       end;
 
 
     procedure tcallnode.check_inlining;
       var
-        st   : tsymtable;
-        para : tcallparanode;
+        st       : tsymtable;
+        para     : tcallparanode;
+        nodecnt,
+        nodelim  : cardinal;
       begin
         { Can we inline the procedure? }
         if (po_inline in procdefinition.procoptions) and
-           (procdefinition.typ=procdef) and
-           tprocdef(procdefinition).has_inlininginfo and
-           heuristics_favors_inlining then
+           (procdefinition.typ=procdef) then
           begin
+            if not tprocdef(procdefinition).has_inlininginfo then
+              begin
+                Comment(V_lineinfo+V_Debug,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                  '", body not stored (has_inlininginfo=false; check ppu / mode / parser_n_not_supported_for_inline)');
+                exit;
+              end;
+            if not heuristics_favors_inlining(nodecnt,nodelim) then
+              begin
+                Comment(V_lineinfo+V_Debug,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                  '", node count '+tostr(nodecnt)+' >= limit '+tostr(nodelim)+' at inline depth '+tostr(inlinelevel));
+                exit;
+              end;
             include(callnodeflags,cnf_do_inline);
             { Check if we can inline the procedure when it references proc/var that
               are not in the globally available }
