@@ -1149,7 +1149,15 @@ const pemagic : array[0..3] of byte = (
                                  Helpers
 ****************************************************************************}
 
-    function djencodesechdrflags(aoptions:TObjSectionOptions):longword;
+    { DJGPP COFF section header has no standard alignment field. We piggy-back
+      the same 4-bit alignment encoding PE-COFF uses (PE_SCN_ALIGN_*, mask
+      $00f00000) into the upper byte of `flags`. This is a private FPC
+      extension — DJGPP `ld` / `objdump` ignore unknown flag bits, and the
+      go32v2 pipeline only feeds these .o files back into our own internal
+      linker (link=ld_int_go32v2). Round-tripping the alignment through the
+      .o is what makes `var x: T align N` (N>4) actually honoured for
+      symbols defined in a unit, not just in the main program. }
+    function djencodesechdrflags(aoptions:TObjSectionOptions;aalign:longint):longword;
       begin
         if (oso_load in aoptions) then
           begin
@@ -1164,22 +1172,62 @@ const pemagic : array[0..3] of byte = (
           result:=COFF_STYP_INFO
         else
           result:=COFF_STYP_REG;
+        case aalign of
+           1 : result:=result or PE_SCN_ALIGN_1BYTES;
+           2 : result:=result or PE_SCN_ALIGN_2BYTES;
+           4 : result:=result or PE_SCN_ALIGN_4BYTES;
+           8 : result:=result or PE_SCN_ALIGN_8BYTES;
+          16 : result:=result or PE_SCN_ALIGN_16BYTES;
+          32 : result:=result or PE_SCN_ALIGN_32BYTES;
+          64 : result:=result or PE_SCN_ALIGN_64BYTES;
+         128 : result:=result or PE_SCN_ALIGN_128BYTES;
+         256 : result:=result or PE_SCN_ALIGN_256BYTES;
+         512 : result:=result or PE_SCN_ALIGN_512BYTES;
+        1024 : result:=result or PE_SCN_ALIGN_1024BYTES;
+        2048 : result:=result or PE_SCN_ALIGN_2048BYTES;
+        4096 : result:=result or PE_SCN_ALIGN_4096BYTES;
+        8192 : result:=result or PE_SCN_ALIGN_8192BYTES;
+          { 0 / unspecified -- leave the alignment bits clear so old
+            FPC-emitted .o and gas-emitted .o both fall through to the
+            historical sizeof(pint)=4 default on read. }
+        end;
       end;
 
 
-    function djdecodesechdrflags(const aname:string;flags:longword):TObjSectionOptions;
+    procedure djdecodesechdrflags(const aname:string;flags:longword;out aoptions:TObjSectionOptions;out aalign:longint);
+      var
+        alignflag : longword;
       begin
-        result:=[];
+        aoptions:=[];
         if flags and COFF_STYP_TEXT<>0 then
-          result:=[oso_data,oso_load,oso_executable]
+          aoptions:=[oso_data,oso_load,oso_executable]
         else if flags and COFF_STYP_BSS<>0 then
-          result:=[oso_load]
+          aoptions:=[oso_load]
         else if flags and COFF_STYP_DATA<>0 then
-          result:=[oso_data,oso_load]
+          aoptions:=[oso_data,oso_load]
         else if flags and COFF_STYP_INFO<>0 then
-          result:=[oso_data,oso_debug]
+          aoptions:=[oso_data,oso_debug]
         else
-          result:=[oso_data]
+          aoptions:=[oso_data];
+        { Recover alignment from the piggy-backed PE_SCN_ALIGN_* bits. Zero
+          means "no FPC alignment hint present" -- caller falls back to
+          sizeof(pint). }
+        alignflag:=flags and PE_SCN_ALIGN_MASK;
+        if alignflag=PE_SCN_ALIGN_8192BYTES then aalign:=8192
+        else if alignflag=PE_SCN_ALIGN_4096BYTES then aalign:=4096
+        else if alignflag=PE_SCN_ALIGN_2048BYTES then aalign:=2048
+        else if alignflag=PE_SCN_ALIGN_1024BYTES then aalign:=1024
+        else if alignflag=PE_SCN_ALIGN_512BYTES  then aalign:=512
+        else if alignflag=PE_SCN_ALIGN_256BYTES  then aalign:=256
+        else if alignflag=PE_SCN_ALIGN_128BYTES  then aalign:=128
+        else if alignflag=PE_SCN_ALIGN_64BYTES   then aalign:=64
+        else if alignflag=PE_SCN_ALIGN_32BYTES   then aalign:=32
+        else if alignflag=PE_SCN_ALIGN_16BYTES   then aalign:=16
+        else if alignflag=PE_SCN_ALIGN_8BYTES    then aalign:=8
+        else if alignflag=PE_SCN_ALIGN_4BYTES    then aalign:=4
+        else if alignflag=PE_SCN_ALIGN_2BYTES    then aalign:=2
+        else if alignflag=PE_SCN_ALIGN_1BYTES    then aalign:=1
+        else aalign:=0;
       end;
 
 
@@ -2147,7 +2195,7 @@ const pemagic : array[0..3] of byte = (
                   sechdr.flags:=sechdr.flags or PE_SCN_LNK_NRELOC_OVFL;
               end
             else
-              sechdr.flags:=djencodesechdrflags(secoptions);
+              sechdr.flags:=djencodesechdrflags(secoptions,secalign);
             MaybeSwap(sechdr);
             FWriter.write(sechdr,sizeof(sechdr));
           end;
@@ -2836,8 +2884,12 @@ const pemagic : array[0..3] of byte = (
                  pedecodesechdrflags(secname,sechdr.flags,secoptions,secalign)
                else
                  begin
-                   secoptions:=djdecodesechdrflags(secname,sechdr.flags);
-                   secalign:=sizeof(pint);
+                   djdecodesechdrflags(secname,sechdr.flags,secoptions,secalign);
+                   { Old FPC compilers and gas emit zero in the alignment
+                     bits -- preserve the historical default in that case
+                     so legacy .o / .a files keep working. }
+                   if secalign=0 then
+                     secalign:=sizeof(pint);
                  end;
                if (Length(secname)>3) and (secname[2] in ['e','f','i','p','r']) then
                  begin

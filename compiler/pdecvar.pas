@@ -1539,29 +1539,18 @@ implementation
                end;
              stringdispose(deprecatedmsg);
 
-             { Reject `var x: T align N = init;` when N exceeds the target's
-               typed-const alignment cap (constalignmax). On COFF go32v2 the
-               object format encodes per-symbol section alignment in only
-               2 bits, so the .balign N inside .data.n_<sym> is silently
-               clamped to 4 by the linker and the symbol does not actually
-               land on an N-byte boundary. Catch it at parse time with a
-               clear hint instead of letting it look correct but be wrong. }
-             if (current_scanner.token=_EQ) and
-                (current_settings.alignment.constalignmax>0) then
-               for i:=0 to sc.count-1 do
-                 begin
-                   vs:=tabstractvarsym(sc[i]);
-                   if (vs.typ=staticvarsym) and
-                      (tstaticvarsym(vs).varalign>current_settings.alignment.constalignmax) then
-                     begin
-                       Comment(V_Error,'`align '+tostr(tstaticvarsym(vs).varalign)+
-                         '` on initialised "'+vs.realname+
-                         '" exceeds target typed-const cap ('+
-                         tostr(current_settings.alignment.constalignmax)+
-                         '); declare BSS and assign in initialization.');
-                       tstaticvarsym(vs).varalign:=0;
-                     end;
-                 end;
+             { Earlier the typed-const path here errored when N exceeded
+               target_info.alignment.constalignmax: on go32v2 the COFF .o
+               could not serialise per-section alignment so .data.n_<sym>
+               was silently clamped to 4 by the linker. Now that
+               djencodesechdrflags / djdecodesechdrflags piggy-back the
+               PE_SCN_ALIGN_* bits into the DJGPP COFF section flags, the
+               alignment round-trips through the .o just fine, and an
+               initialised typed-const lands on the requested boundary.
+               Same cap is therefore obsolete on go32v2 -- the only
+               targets where it might still bite are obj formats that
+               truly can't encode alignment, and ngenutil already emits
+               scanner_n_alignment_larger_than_max there. }
 
              { Handling of Delphi typed const = initialized vars }
              if allowdefaultvalue and

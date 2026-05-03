@@ -474,10 +474,19 @@ function get_next_varsym(def: tabstractrecorddef; const SymList:TFPHashObjectLis
 
 
     constructor tasmlisttypedconstbuilder.create(sym: tstaticvarsym);
+      var
+        opts : ttcasmlistoptions;
       begin
         inherited;
         fsym:=sym;
-        ftcb:=ctai_typedconstbuilder.create([tcalo_make_dead_strippable,tcalo_apply_constalign]);
+        opts:=[tcalo_make_dead_strippable,tcalo_apply_constalign];
+        { When the user explicitly asked for `var x: T align N = init;`,
+          tcalo_apply_constalign would clamp N back to the target's
+          constalignmax (4 on go32v2) -- defeating the bypass. Same
+          escape hatch ngenutil.insertbssdata uses for the BSS path. }
+        if sym.varalign>0 then
+          exclude(opts,tcalo_apply_constalign);
+        ftcb:=ctai_typedconstbuilder.create(opts);
         fdatalist:=tasmlist.create;
         curoffset:=0;
       end;
@@ -1240,7 +1249,17 @@ function get_next_varsym(def: tabstractrecorddef; const SymList:TFPHashObjectLis
               sec:=sec_data;
             secname:=asmsym.Name;
           end;
-        reslist:=ftcb.get_final_asmlist(asmsym,fsym,fsym.vardef,sec,secname,fsym.vardef.alignment);
+        { Honour `var x: T align N = init;` -- user-requested alignment
+          on the staticvarsym takes precedence over the type's natural
+          alignment, mirroring what ngenutil.insertbssdata does for the
+          BSS path. Until djencodesechdrflags learned to serialise
+          per-section alignment, this had to be capped at constalignmax
+          (the parse-time error in pdecvar.pas) -- now that the COFF .o
+          carries the alignment bits, we can pass the bypass through. }
+        if fsym.varalign>fsym.vardef.alignment then
+          reslist:=ftcb.get_final_asmlist(asmsym,fsym,fsym.vardef,sec,secname,fsym.varalign)
+        else
+          reslist:=ftcb.get_final_asmlist(asmsym,fsym,fsym.vardef,sec,secname,fsym.vardef.alignment);
         if addstabx then
           begin
             { see same code in ncgutil.insertbssdata }
