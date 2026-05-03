@@ -134,7 +134,7 @@ implementation
        systems,cpubase,aasmbase,aasmtai,
        { symtable }
        symconst,symbase,symsym,symtype,symtable,defutil,defcmp,procdefutil,symcreat,
-       paramgr,
+       paramgr,parabase,
        fmodule,
        { pass 1 }
        ngenutil,nld,ncal,ncon,nflw,nadd,ncnv,nmem,
@@ -254,11 +254,32 @@ implementation
       end;
 
 
+    { True if cgp describes a single integer-class CPU register location.
+      Used by is_assembler_inlineable to decide whether the function result
+      is captureable by a single MOV after the spliced asm body. }
+    function paraloc_is_single_intreg(const cgp: tcgpara): boolean;
+      var
+        loc : pcgparalocation;
+      begin
+        result:=false;
+        loc:=cgp.location;
+        if not assigned(loc) then
+          exit;
+        if assigned(loc^.next) then
+          exit;
+        if not (loc^.loc in [LOC_REGISTER,LOC_CREGISTER]) then
+          exit;
+        if getregtype(loc^.register)<>R_INTREGISTER then
+          exit;
+        result:=true;
+      end;
+
+
     { Returns true if current_procinfo's body looks like a pure-asm nostackframe
-      routine whose asm content is safe to splice into a caller. v1 scope:
-      pure-asm + nostackframe, no parameters, void return, body contains only
-      register/immediate operands. Functions and parameterised procs are
-      deferred until register-coordination machinery exists. }
+      routine whose asm content is safe to splice into a caller. v2(d) scope:
+      pure-asm + nostackframe, no parameters, return is either void OR a single
+      integer-register result (we capture %funcret_reg into a temp post-splice).
+      Parameterised procs are deferred to v2(c). }
     function is_assembler_inlineable: boolean;
       var
         ok : boolean;
@@ -277,7 +298,14 @@ implementation
         if current_procinfo.procdef.maxparacount<>0 then
           exit;
         if not is_void(current_procinfo.procdef.returndef) then
-          exit;
+          begin
+            { Only allow non-void returns whose ABI location is a single
+              integer register -- everything else (FPU stack, MM regs, multi-
+              register pairs, memory return via hidden funcret para) needs
+              machinery we don't have yet. }
+            if not paraloc_is_single_intreg(current_procinfo.procdef.funcretloc[calleeside]) then
+              exit;
+          end;
         ok:=true;
         foreachnodestatic(cpi.code,@gather_asmnode_check,@ok);
         result:=ok;

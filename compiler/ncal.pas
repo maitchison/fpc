@@ -3455,6 +3455,13 @@ implementation
                (aktassignmentnode.left.resultdef=resultdef)) then
           exit;
 
+        { v2(d) inline-asm splice captures the funcret CPU register into a
+          temprefn-shaped funcretnode. Disable assignment-target reuse for
+          such procs so pass1_inline only ever has to handle the temp case. }
+        if (procdefinition.typ=procdef) and
+           (pio_inline_asm in tprocdef(procdefinition).implprocoptions) then
+          exit;
+
         { destination must be able to be passed as var parameter }
         if not valid_for_var(aktassignmentnode.left,false) then
           exit;
@@ -5741,6 +5748,40 @@ implementation
 
         { Concat the body and finalization parts }
         addstatement(inlineinitstatement,body);
+
+        { v2(d): inline-asm with non-void register return. The body just
+          left its result in the funcret CPU register; copy it into the
+          funcret temp so the inlineblock's trailing temprefnode evaluates
+          to that value. funcret_can_be_reused has been disabled for asm-
+          inline procs above, so funcretnode is always a temprefn here.
+          The funcret temp's ttempcreatenode lives inside callinitblock,
+          which we copied above (line "addstatement(inlineinitstatement,
+          callinitblock.getcopy)"). The copy has a FRESH ttempinfo, and
+          ttempcreatenode.dogetcopy left a hookoncopy pointer from the
+          original tempinfo to the copy -- follow it so codegen sees the
+          tempinfo that ti_valid will actually be set on.
+
+          Cross-unit gotcha: only funcretloc[callerside] is serialised
+          to the PPU; funcretloc[calleeside] is rebuilt on demand via
+          init_paraloc_info(calleeside). For an inline-asm callee
+          loaded from a .ppu (e.g. SYSTEM's get_frame), calleeside
+          starts out with a nil location pointer until that init runs
+          -- so call it ourselves before reading the register. }
+        if (pio_inline_asm in tprocdef(procdefinition).implprocoptions) and
+           not is_void(tprocdef(procdefinition).returndef) and
+           (cnf_return_value_used in callnodeflags) and
+           assigned(funcretnode) and
+           (funcretnode.nodetype=temprefn) and
+           assigned(ttemprefnode(funcretnode).tempinfo^.hookoncopy) then
+          begin
+            tprocdef(procdefinition).init_paraloc_info(calleeside);
+            addstatement(inlineinitstatement,
+              cregcapturenode.create(
+                ttemprefnode(funcretnode).tempinfo^.hookoncopy,
+                tprocdef(procdefinition).funcretloc[calleeside].location^.register,
+                tprocdef(procdefinition).returndef));
+          end;
+
         addstatement(inlineinitstatement,inlinecleanupblock);
         inlinecleanupblock:=nil;
 
