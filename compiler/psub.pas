@@ -173,10 +173,13 @@ implementation
        ;
 
     { Walks the proc body looking for asmnodes; checks every tai inside is
-      safe to splice into a caller. v1 rules: no labels (named or local), no
-      operands referencing locals/params, no symbol-bearing references or
-      constants. Returns true only if every asmnode found passes; an empty
-      walk (no asmnodes) also returns true. }
+      safe to splice into a caller. v2 rules: no labels (named or local), no
+      operands referencing locals/params. Symbol-bearing references and
+      symbol-bearing data constants ARE allowed -- asmsymbols are unit-
+      global and survive same-unit and cross-unit cloning via
+      tai_cpu_abstract.ppuwriteoper / putasmsymbol. Returns true only if
+      every asmnode found passes; an empty walk (no asmnodes) also returns
+      true. }
     function asmnode_inline_safe(p: tasmnode): boolean;
       var
         hp : tai;
@@ -204,23 +207,21 @@ implementation
                   ai:=tai_cpu_abstract(hp);
                   for i:=0 to ai.ops-1 do
                     begin
-                      { Reject locals + arch-specific operand kinds outright. }
-                      if ai.oper[i]^.typ in [top_none,top_reg,top_const,top_bool] then
+                      { Whitelist of operand kinds known safe to splice.
+                        top_ref with a symbol attached is fine: asmsymbols
+                        live at unit scope, getcopy preserves the pointer,
+                        and the PPU writer/reader round-trips them. }
+                      if ai.oper[i]^.typ in [top_none,top_reg,top_const,top_bool,top_ref] then
                         continue;
-                      if ai.oper[i]^.typ=top_ref then
-                        begin
-                          if (ai.oper[i]^.ref^.symbol<>nil) or
-                             (ai.oper[i]^.ref^.relsymbol<>nil) then
-                            exit(false);
-                        end
-                      else
-                        { top_local + any non-x86 operand kind not whitelisted above }
-                        exit(false);
+                      { top_local + any non-x86 operand kind not whitelisted above }
+                      exit(false);
                     end;
                 end;
               ait_const:
-                if tai_const(hp).sym<>nil then
-                  exit(false);
+                { ait_const with a symbol (e.g. "dd somesym") is also fine
+                  for the same reason as top_ref above -- the symbol is
+                  unit-global and serialises cleanly. }
+                ;
             else
               exit(false);
             end;

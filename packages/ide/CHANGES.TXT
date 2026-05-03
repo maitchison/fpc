@@ -7,6 +7,28 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.20 / Compiler 3.3.6 ==
+
+Compiler
+  * Inline-asm bodies may now reference globals, typed constants, and
+    other unit-scope symbols. The body-shape check that previously
+    rejected `top_ref` operands with a `symbol`/`relsymbol` attached
+    and `ait_const` data with a sym now accepts them. asmsymbols are
+    unit-global; getcopy preserves the pointer in the same unit, and
+    the existing PPU writer (taicpu.ppuwriteoper / putasmsymbol)
+    already round-trips them across units, so no PPU bump is needed
+    for this change. Examples now eligible:
+
+        var counter: longint;
+        procedure inc_counter; assembler; nostackframe; inline;
+        asm
+          incl counter
+        end;
+
+    Local labels, top_local operands, and label-referencing operands
+    remain rejected (handled by later v2 changes).
+
+
 == IDE 1.0.19 / Compiler 3.3.5 ==
 
 Compiler
