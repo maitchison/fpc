@@ -72,6 +72,10 @@ interface
           procedure pass_generate_code; override;
        end;
 
+       tcgregcapturenode = class(tregcapturenode)
+          procedure pass_generate_code; override;
+       end;
+
   implementation
 
     uses
@@ -766,6 +770,30 @@ interface
       end;
 
 
+{*****************************************************************************
+                            TCGREGCAPTURENODE
+*****************************************************************************}
+
+    { Inline-asm v2(d) splice tail. The preceding tasmnode just emitted the
+      callee's pure-asm body inside an alloc/dealloc-all-CPU-regs bracket,
+      so srcreg currently holds the value but the regalloc has marked it
+      free. Re-allocate srcreg, copy it into the temp's location (which the
+      preceding tcgtempcreatenode has materialised), then release it. The
+      reg's physical contents survive the alloc->free->alloc bracket because
+      no opcodes are emitted between dealloc and our re-alloc. }
+    procedure tcgregcapturenode.pass_generate_code;
+      begin
+        location_reset(location,LOC_VOID,OS_NO);
+        if not assigned(tempinfo) then
+          internalerror(2026050303);
+        if not(ti_valid in ctempinfoaccessor.gettempinfoflags(tempinfo)) then
+          internalerror(2026050304);
+        cg.getcpuregister(current_asmdata.CurrAsmList,srcreg);
+        hlcg.a_load_reg_loc(current_asmdata.CurrAsmList,srcdef,srcdef,srcreg,tempinfo^.location);
+        cg.ungetcpuregister(current_asmdata.CurrAsmList,srcreg);
+      end;
+
+
 begin
    cnothingnode:=tcgnothingnode;
    casmnode:=tcgasmnode;
@@ -775,4 +803,5 @@ begin
    ctemprefnode:=tcgtemprefnode;
    ctempdeletenode:=tcgtempdeletenode;
    cfinalizetempsnode:=tcgfinalizetempsnode;
+   cregcapturenode:=tcgregcapturenode;
 end.

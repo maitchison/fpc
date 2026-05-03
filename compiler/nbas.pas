@@ -336,6 +336,28 @@ interface
         end;
        ttempdeletenodeclass = class of ttempdeletenode;
 
+       { inline-asm v2(d) capture node. Splice-time-only: never typed by the
+         parser, never serialised to PPU, never seen outside a single inline
+         expansion. Sits immediately after a spliced asmnode whose pure-asm
+         body left its result in srcreg (the callee's funcret reg). At
+         pass_generate_code time, copies srcreg -> tempinfo^.location so
+         the surrounding inlineblock can yield the temp's value as the
+         call expression's result. tempinfo points into a ttempcreatenode
+         that is created and deleted inside the same inlineblock. }
+       tregcapturenode = class(tnode)
+          tempinfo : ptempinfo;
+          srcreg   : tregister;
+          srcdef   : tdef;
+          constructor create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef); virtual;
+          constructor ppuload(t:tnodetype;ppufile:tcompilerppufile);override;
+          procedure ppuwrite(ppufile:tcompilerppufile);override;
+          function dogetcopy: tnode; override;
+          function pass_1: tnode; override;
+          function pass_typecheck: tnode; override;
+          function docompare(p: tnode): boolean; override;
+       end;
+       tregcapturenodeclass = class of tregcapturenode;
+
     var
        cnothingnode : tnothingnodeclass = tnothingnode;
        cerrornode : terrornodeclass = terrornode;
@@ -348,6 +370,7 @@ interface
        ctempcreatenode : ttempcreatenodeclass = ttempcreatenode;
        ctemprefnode : ttemprefnodeclass = ttemprefnode;
        ctempdeletenode : ttempdeletenodeclass = ttempdeletenode;
+       cregcapturenode : tregcapturenodeclass = tregcapturenode;
 
        { Create a blocknode and statement node for multiple statements
          generated internally by the parser }
@@ -1963,5 +1986,65 @@ implementation
         WriteLn(T, PrintNodeIndention, '<release_to_normal>', release_to_normal, '</release_to_normal>');
       end;
 {$endif DEBUG_NODE_XML}
+
+
+{*****************************************************************************
+                            TREGCAPTURENODE
+*****************************************************************************}
+
+    constructor tregcapturenode.create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef);
+      begin
+        inherited create(regcapturen);
+        tempinfo:=_tempinfo;
+        srcreg:=_srcreg;
+        srcdef:=_srcdef;
+      end;
+
+
+    constructor tregcapturenode.ppuload(t:tnodetype;ppufile:tcompilerppufile);
+      begin
+        { regcapturen is a splice-time-only node; never written to a PPU. }
+        internalerror(2026050301);
+      end;
+
+
+    procedure tregcapturenode.ppuwrite(ppufile:tcompilerppufile);
+      begin
+        { regcapturen is a splice-time-only node; never written to a PPU. }
+        internalerror(2026050302);
+      end;
+
+
+    function tregcapturenode.dogetcopy: tnode;
+      var
+        n: tregcapturenode;
+      begin
+        n:=tregcapturenode(inherited dogetcopy);
+        n.tempinfo:=tempinfo;
+        n.srcreg:=srcreg;
+        n.srcdef:=srcdef;
+        result:=n;
+      end;
+
+
+    function tregcapturenode.pass_typecheck: tnode;
+      begin
+        result:=nil;
+        resultdef:=voidtype;
+      end;
+
+
+    function tregcapturenode.pass_1: tnode;
+      begin
+        result:=nil;
+        expectloc:=LOC_VOID;
+      end;
+
+
+    function tregcapturenode.docompare(p: tnode): boolean;
+      begin
+        { regcapturen is splice-internal; tree-compare not meaningful. }
+        result:=false;
+      end;
 
 end.

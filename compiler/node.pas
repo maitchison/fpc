@@ -110,7 +110,8 @@ interface
           objcselectorn,    { node for an Objective-C message selector }
           objcprotocoln,    { node for an Objective-C @protocol() expression (returns metaclass associated with protocol) }
           specializen,      { parser-only node to handle Delphi-mode inline specializations }
-          finalizetempsn        { Internal node used to clean up code generator temps (warning: must NOT create additional tepms that may need to be finalised!) }
+          finalizetempsn,       { Internal node used to clean up code generator temps (warning: must NOT create additional tepms that may need to be finalised!) }
+          regcapturen           { inline-asm v2(d): capture a CPU register's value into a temp's location post-splice. Constructed only at splice time, never serialised to PPU. }
        );
 
        tnodetypeset = set of tnodetype;
@@ -194,7 +195,8 @@ interface
           'objcselectorn',
           'objcprotocoln',
           'specializen',
-          'finalizetempsn');
+          'finalizetempsn',
+          'regcapturen');
 
       { a set containing all const nodes }
       nodetype_const = [niln,

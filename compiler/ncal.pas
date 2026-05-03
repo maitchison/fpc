@@ -3455,6 +3455,13 @@ implementation
                (aktassignmentnode.left.resultdef=resultdef)) then
           exit;
 
+        { v2(d) inline-asm splice captures the funcret CPU register into a
+          temprefn-shaped funcretnode. Disable assignment-target reuse for
+          such procs so pass1_inline only ever has to handle the temp case. }
+        if (procdefinition.typ=procdef) and
+           (pio_inline_asm in tprocdef(procdefinition).implprocoptions) then
+          exit;
+
         { destination must be able to be passed as var parameter }
         if not valid_for_var(aktassignmentnode.left,false) then
           exit;
@@ -5741,6 +5748,23 @@ implementation
 
         { Concat the body and finalization parts }
         addstatement(inlineinitstatement,body);
+
+        { v2(d): inline-asm with non-void register return. The body just
+          left its result in the funcret CPU register; copy it into the
+          funcret temp so the inlineblock's trailing temprefnode evaluates
+          to that value. funcret_can_be_reused has been disabled for asm-
+          inline procs above, so funcretnode is always a temprefn here. }
+        if (pio_inline_asm in tprocdef(procdefinition).implprocoptions) and
+           not is_void(tprocdef(procdefinition).returndef) and
+           (cnf_return_value_used in callnodeflags) and
+           assigned(funcretnode) and
+           (funcretnode.nodetype=temprefn) then
+          addstatement(inlineinitstatement,
+            cregcapturenode.create(
+              ttemprefnode(funcretnode).tempinfo,
+              tprocdef(procdefinition).funcretloc[calleeside].location^.register,
+              tprocdef(procdefinition).returndef));
+
         addstatement(inlineinitstatement,inlinecleanupblock);
         inlinecleanupblock:=nil;
 

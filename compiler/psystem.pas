@@ -909,6 +909,7 @@ implementation
         nodeclass[guidconstn]:=cguidconstnode;
         nodeclass[rttin]:=crttinode;
         nodeclass[loadparentfpn]:=cloadparentfpnode;
+        nodeclass[regcapturen]:=cregcapturenode;
       end;
 
 

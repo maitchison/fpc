@@ -7,6 +7,37 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.22 / Compiler 3.3.8 ==
+
+Compiler
+  * Inline-asm functions may now return a value when the result fits
+    in a single integer register (longint, dword, pointer, ...). The
+    body still has zero parameters and writes its result to the ABI
+    funcret register the usual way (`%eax` on i386); after the body
+    is spliced into the caller, a synthetic `tregcapturenode` copies
+    that register into the funcret temp the inliner created on the
+    caller side. The capture is bracketed by `cg.getcpuregister` /
+    `cg.ungetcpuregister` so the regalloc treats the value as a real
+    use across the asmnode's all-cpu-regs alloc/dealloc bracket.
+
+    Float, MM-register, multi-register-pair, and memory-via-hidden-
+    funcret-para returns are still rejected by `is_assembler_inlineable`
+    -- the gate uses `paraloc_is_single_intreg(funcretloc[calleeside])`.
+    Assignment-target reuse (`x := f();` collapsing the temp into `x`)
+    is disabled for asm-inline procs so `pass1_inline` only ever sees
+    a `temprefn`-shaped funcretnode.
+
+    Example:
+
+        function ten: longint; assembler; nostackframe; inline;
+        asm
+          movl $10, %eax
+        end;
+
+        var x: longint;
+        x := ten + ten;        { spliced twice, no `call ten` emitted }
+
+
 == IDE 1.0.21 / Compiler 3.3.7 ==
 
 Compiler
