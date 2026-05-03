@@ -180,6 +180,20 @@ Const
          packrecords     : shortint;
          maxfpuregisters : shortint;
 
+         { Inline-heuristic knobs (commit 1: plumbing only).
+           Exposed via -OoINLINE<NAME>=N (and the OPTIMIZATION directive).
+           Defaults reproduce pre-knob behaviour exactly:
+             inlineautolimit  = 25     (psub.pas auto-inline gate)
+             inlinehardcap    = 0      (no per-site absolute cap)
+             inlinegrowthcap  = 0      (no per-proc cumulative cap)
+             inlinesitebudget = 0      (use legacy depth formula in ncal.pas)
+           When cs_opt_size is set, callers may apply alternate -Os values;
+           that is a frontend choice, not baked into the field semantics. }
+         inlineautolimit   : longint;
+         inlinehardcap     : longint;
+         inlinegrowthcap   : longint;
+         inlinesitebudget  : longint;
+
          verbosity       : longint;
 
          cputype,
@@ -538,6 +552,12 @@ Const
         packrecords     : 0;
 {$endif i8086}
         maxfpuregisters : 0;
+
+        { Inline-heuristic defaults: see tsettings declaration above. }
+        inlineautolimit   : 25;
+        inlinehardcap     : 0;
+        inlinegrowthcap   : 0;
+        inlinesitebudget  : 0;
 
         verbosity : V_Default;
 

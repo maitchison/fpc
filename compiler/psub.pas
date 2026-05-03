@@ -2016,18 +2016,20 @@ implementation
 
        function heuristics_favors_autoinlining(code: tnode): boolean;
          var
-           complexityAvail : integer;
+           limit,
+           complexityAvail : longint;
          begin
            { rough approximation if we should auto inline:
              - if the tree is simple enough
              - if the tree is not too big
              A bigger tree which is simpler might be autoinlined otoh
              a smaller and complexer tree as well: so we use the sum of
-             both measures here }
-
-           { This is a shortcutted version of
-             "result:=node_count(code)+node_complexity(code)<=25". }
-           complexityAvail:=25-node_complexity(code);
+             both measures here. Threshold defaults to 25 and is
+             overridable via -OoINLINEAUTOLIMIT=N. }
+           limit:=current_settings.inlineautolimit;
+           if limit<=0 then
+             exit(false);
+           complexityAvail:=limit-longint(node_complexity(code));
            result:=(complexityAvail>0) and (node_count(code,complexityAvail+1)<=dword(complexityAvail));
          end;
 

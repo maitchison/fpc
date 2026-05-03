@@ -3493,6 +3493,11 @@ type
             packrecords:=tokenreadshortint;
             maxfpuregisters:=tokenreadshortint;
 
+            inlineautolimit:=tokenreadlongint;
+            inlinehardcap:=tokenreadlongint;
+            inlinegrowthcap:=tokenreadlongint;
+            inlinesitebudget:=tokenreadlongint;
+
             verbosity:=tokenreadlongint;
 
             cputype:=tcputype(tokenreadenum(sizeof(tcputype)));
@@ -3580,6 +3585,12 @@ type
             tokenwriteshortint(packenum);
             tokenwriteshortint(packrecords);
             tokenwriteshortint(maxfpuregisters);
+
+            tokenwritelongint(inlineautolimit);
+            tokenwritelongint(inlinehardcap);
+            tokenwritelongint(inlinegrowthcap);
+            tokenwritelongint(inlinesitebudget);
+
             tokenwritelongint(verbosity);
 
             tokenwriteenum(cputype,sizeof(tcputype));

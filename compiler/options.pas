@@ -3502,7 +3502,7 @@ begin
          end;
        'o' :
          begin
-           if not UpdateOptimizerStr(copy(more,j+1),init_settings.optimizerswitches) then
+           if not UpdateOptimizerStr(copy(more,j+1),init_settings) then
             IllegalPara(opt);
            break;
          end;

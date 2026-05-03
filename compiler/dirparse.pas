@@ -29,10 +29,11 @@ interface
 
     uses
       globtype,
+      globals,
       systems;
 
     function UpdateAlignmentStr(s:string;var a:talignmentinfo):boolean;
-    function UpdateOptimizerStr(s:string;var a:toptimizerswitches):boolean;
+    function UpdateOptimizerStr(s:string;var settings:tsettings):boolean;
     function UpdateWpoStr(s: string; var a: twpoptimizerswitches): boolean;
     function UpdateDebugStr(s:string;var a:tdebugswitches):boolean;
     function UpdateTargetSwitchStr(s: string; var a: ttargetswitches; global: boolean): boolean;
@@ -40,7 +41,6 @@ interface
 implementation
 
     uses
-      globals,
       cutils,
       symtable;
 
@@ -112,9 +112,13 @@ implementation
       end;
 
 
-    function UpdateOptimizerStr(s:string;var a:toptimizerswitches):boolean;
+    function UpdateOptimizerStr(s:string;var settings:tsettings):boolean;
       var
         tok   : string;
+        eqpos,
+        nval,
+        code  : longint;
+        keyname : string;
         doset,
         found : boolean;
         opt   : toptimizerswitch;
@@ -125,6 +129,36 @@ implementation
           tok:=GetToken(s,',');
           if tok='' then
            break;
+          { Numeric KEY=N form: inline-heuristic knobs.
+            Recognised keys (default value in parens):
+              INLINEAUTOLIMIT  (25) -- auto-inline gate threshold
+              INLINEHARDCAP    (0)  -- per-call-site absolute body cap; 0 = none
+              INLINEGROWTHCAP  (0)  -- per-proc cumulative inline-growth cap; 0 = none
+              INLINESITEBUDGET (0)  -- flat per-site budget; 0 = use legacy depth formula
+            Negative N is rejected. NO<KEY>=N is not accepted; to disable,
+            set the value to 0 (which is the default for all but INLINEAUTOLIMIT). }
+          eqpos:=Pos('=',tok);
+          if eqpos>0 then
+            begin
+              keyname:=Copy(tok,1,eqpos-1);
+              val(Copy(tok,eqpos+1,length(tok)-eqpos),nval,code);
+              if (code<>0) or (nval<0) then
+                begin
+                  result:=false;
+                  continue;
+                end;
+              if keyname='INLINEAUTOLIMIT' then
+                settings.inlineautolimit:=nval
+              else if keyname='INLINEHARDCAP' then
+                settings.inlinehardcap:=nval
+              else if keyname='INLINEGROWTHCAP' then
+                settings.inlinegrowthcap:=nval
+              else if keyname='INLINESITEBUDGET' then
+                settings.inlinesitebudget:=nval
+              else
+                result:=false;
+              continue;
+            end;
           if Copy(tok,1,2)='NO' then
             begin
               delete(tok,1,2);
@@ -148,9 +182,9 @@ implementation
              if opt<>cs_opt_regvar then
 {$endif}
               if doset then
-                include(a,opt)
+                include(settings.optimizerswitches,opt)
               else
-                exclude(a,opt);
+                exclude(settings.optimizerswitches,opt);
             end
           else
             result:=false;
