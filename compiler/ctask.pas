@@ -70,6 +70,12 @@ type
     procedure update_circular_unit_groups;
     procedure search_finished_scc(m: tmodule{$IFDEF DEBUG_PPU_CYCLES}; const Indent: string = ''{$ENDIF});
     function find_unfinished_leaf_scc(m: tmodule): tmodule;
+    { Count how many other unfinished modules in m's SCC import m via
+      their INTERFACE-uses. Used by processqueue to prefer advancing
+      modules whose interface is depended on by SCC peers, so an
+      inline-provider's implementation runs before consumers' impls
+      that may want to inline its bodies. }
+    function scc_intf_inbound_count(m: tmodule): integer;
     function is_uses_waiting(m: tmodule; uu: tused_unit): boolean;
     function check_do_reload_cycle(scc_root: tmodule): boolean;
     function check_crc_mismatches(scc_root: tmodule): boolean;
@@ -571,6 +577,38 @@ begin
   Result:=nil;
 end;
 
+function ttask_handler.scc_intf_inbound_count(m: tmodule): integer;
+{ How many unfinished modules in m's SCC import m via interface-uses.
+  Higher = m's interface is more central in the SCC; advance m's impl
+  earlier so its inline bodies are populated for the consumers. }
+var
+  other: tmodule;
+  uu: tused_unit;
+begin
+  result:=0;
+  if (m.scc_root=nil) or m.scc_finished then
+    exit;
+  other:=m.scc_root;
+  while assigned(other) do
+    begin
+      if (other<>m) and (other.state<ms_compiled) then
+        begin
+          uu:=tused_unit(other.used_units.first);
+          while assigned(uu) do
+            begin
+              if uu.in_interface and (uu.u=m) then
+                begin
+                  inc(result);
+                  break;
+                end;
+              uu:=tused_unit(uu.next);
+            end;
+        end;
+      other:=other.scc_next;
+    end;
+end;
+
+
 function ttask_handler.is_uses_waiting(m: tmodule; uu: tused_unit): boolean;
 var
   um: tmodule;
@@ -1048,10 +1086,18 @@ begin
         {$ENDIF}
         if (m.state<ms_processed) and cancontinue(m,firstwaiting) then
           begin
-            { prefer do_reload, then pas, last ppu }
+            { prefer do_reload, then a unit whose interface is imported by
+              other unfinished SCC members (inline-providers ahead of
+              consumers, so inlininginfo is populated before consumer impls
+              are parsed -- avoids the "body not stored" miss-inline),
+              then pas, last ppu }
             if (best=nil)
                 or m.do_reload
-                or (not best.do_reload and best.fromppu and not m.fromppu)
+                or (not best.do_reload and
+                    (scc_intf_inbound_count(m) > scc_intf_inbound_count(best)))
+                or (not best.do_reload
+                    and (scc_intf_inbound_count(m) = scc_intf_inbound_count(best))
+                    and best.fromppu and not m.fromppu)
             then
               best:=m;
           end;
