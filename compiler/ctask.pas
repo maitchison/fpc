@@ -578,22 +578,27 @@ begin
 end;
 
 function ttask_handler.scc_intf_inbound_count(m: tmodule): integer;
-{ How many unfinished modules in m's SCC import m via interface-uses.
-  Higher = m's interface is more central in the SCC; advance m's impl
-  earlier so its inline bodies are populated for the consumers. }
+{ How many other unfinished loaded modules import m via interface-uses.
+  Higher means m's interface is depended on by other unfinished
+  consumers; advancing m's impl earlier populates inlininginfo for any
+  inline procs declared in m's interface so the consumers' impls can
+  inline them.
+
+  Note: walks loaded_units globally, not just m's SCC. The pathological
+  case is uLeaf imported in interface by uMidA where each ends up as
+  its OWN singleton SCC (no impl-cycle visible at scheduling time);
+  walking only m.scc_next would miss uMidA entirely. }
 var
-  other: tmodule;
+  hp: tmodule;
   uu: tused_unit;
 begin
   result:=0;
-  if (m.scc_root=nil) or m.scc_finished then
-    exit;
-  other:=m.scc_root;
-  while assigned(other) do
+  hp:=tmodule(loaded_units.first);
+  while assigned(hp) do
     begin
-      if (other<>m) and (other.state<ms_compiled) then
+      if (hp<>m) and (hp.state<ms_compiled) then
         begin
-          uu:=tused_unit(other.used_units.first);
+          uu:=tused_unit(hp.used_units.first);
           while assigned(uu) do
             begin
               if uu.in_interface and (uu.u=m) then
@@ -604,7 +609,7 @@ begin
               uu:=tused_unit(uu.next);
             end;
         end;
-      other:=other.scc_next;
+      hp:=tmodule(hp.next);
     end;
 end;
 
