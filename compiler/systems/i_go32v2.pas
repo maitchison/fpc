@@ -79,7 +79,7 @@ unit i_go32v2;
                 coalescealign   : 0;
                 coalescealignskipmax: 0;
                 constalignmin   : 0;
-                constalignmax   : 4;
+                constalignmax   : 8;
                 varalignmin     : 0;
                 varalignmax     : 8;
                 localalignmin   : 0;
