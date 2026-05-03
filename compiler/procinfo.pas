@@ -149,6 +149,12 @@ unit procinfo;
           saved_regs_address,
           saved_regs_mm: TCPURegisterSet;
 
+          { Cumulative count of nodes spliced into this procedure's body by
+            inline expansion. Updated at each accepted call site by
+            tcallnode.check_inlining. Used by -OoINLINEGROWTHCAP=N to cap
+            total per-procedure code growth from inlining. }
+          inline_growth : cardinal;
+
           constructor create(aparent:tprocinfo);virtual;
           destructor destroy;override;
 
@@ -239,6 +245,7 @@ implementation
         para_stack_size:=0;
         fstackalignment:=target_info.stackalign;
         flags:=[];
+        inline_growth:=0;
         init_framepointer;
         framepointer:=NR_FRAME_POINTER_REG;
         maxpushedparasize:=0;

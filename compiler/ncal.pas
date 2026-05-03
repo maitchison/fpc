@@ -4818,24 +4818,96 @@ implementation
 
 
     function tcallnode.heuristics_favors_inlining(out nodecnt,limit:cardinal):boolean;
+      var
+        body          : tnode;
+        hardcap,
+        growthcap,
+        sitebudget    : longint;
+        grown,
+        cap_for_count : cardinal;
       begin
-        {  Prevent too deep inlining recursion and code bloat by inlining
+        {  Decides whether to inline this call site. Three CLI knobs gate the
+           decision; each is checked in order.
 
-           The actual formuala is
-                             inlinelevel/3+1    /-------
-               node count <  -----------------\/  10000
+           1. -OoINLINEHARDCAP=N  (default 0 = disabled)
+              Reject any body whose own node_count exceeds N. A blanket
+              "too big to ever be a good inline candidate" cap, independent
+              of context. Useful for bounding the worst case (the legacy
+              depth-0 limit allowed bodies up to ~9999 nodes).
 
-           This allows exponential grow of the code only to a certain limit.
+           2. -OoINLINEGROWTHCAP=N (default 0 = disabled)
+              Reject if the enclosing procedure has already grown by >= N
+              nodes from prior inline expansions. This caps cumulative
+              code growth per caller -- the wide-but-shallow case the
+              legacy depth formula misses.
 
-           Remarks
-            - The current approach calculates the inlining level top down, so outer call nodes (nodes closer to the leaf) might not be inlined
-              if the max. complexity is reached. This is done because it makes the implementation easier and because
-              there might be situations were it is more beneficial to inline inner nodes and do the calls to the outer nodes
-              if the outer nodes are in a seldomly used code path
-            - The code avoids to use functions from the math unit
-        }
+           3. -OoINLINESITEBUDGET=N (default 0 = use legacy depth formula)
+              When non-zero: use a flat budget instead of the depth formula.
+              Inline only if the body's node_count <= N.
+
+              When zero: fall back to the legacy depth formula
+                                 inlinelevel/3+1    /-------
+                  node count <  -----------------\/  10000
+              which scales the per-site limit with textual nesting depth.
+              This is the historical FPC behaviour. Defaults reproduce it.
+
+           nodecnt and limit (the OUT params) are set so the diagnostic
+           message in check_inlining can report the rejection reason. }
+        body:=tprocdef(procdefinition).inlininginfo^.code;
+
+        { (1) absolute hard cap }
+        hardcap:=current_settings.inlinehardcap;
+        if hardcap>0 then
+          begin
+            { node_count with limit hardcap+1 lets us early-exit. }
+            nodecnt:=node_count(body,cardinal(hardcap)+1);
+            if nodecnt>cardinal(hardcap) then
+              begin
+                limit:=cardinal(hardcap);
+                exit(false);
+              end;
+          end;
+
+        { (2) cumulative-growth cap on the enclosing procedure }
+        growthcap:=current_settings.inlinegrowthcap;
+        if (growthcap>0) and assigned(current_procinfo) then
+          begin
+            grown:=current_procinfo.inline_growth;
+            if grown>=cardinal(growthcap) then
+              begin
+                { cap fully consumed; don't even count the body }
+                nodecnt:=0;
+                limit:=0;
+                exit(false);
+              end;
+            cap_for_count:=cardinal(growthcap)-grown+1;
+            nodecnt:=node_count(body,cap_for_count);
+            if nodecnt>cardinal(growthcap)-grown then
+              begin
+                limit:=cardinal(growthcap)-grown;
+                exit(false);
+              end;
+          end;
+
+        { (3) per-site decision: flat budget or legacy depth formula. }
+        sitebudget:=current_settings.inlinesitebudget;
+        if sitebudget>0 then
+          begin
+            limit:=cardinal(sitebudget)+1;
+            nodecnt:=node_count(body,limit);
+            result:=nodecnt<=cardinal(sitebudget);
+            limit:=cardinal(sitebudget);
+            exit;
+          end;
+
+        { Legacy depth formula -- unchanged. Default behaviour with
+          all four knobs at defaults reproduces this exactly.
+          - The current approach calculates the inlining level top down,
+            so outer call nodes might not be inlined if the max. complexity
+            is reached.
+          - The code avoids to use functions from the math unit. }
         limit:=round(exp((1.0/(inlinelevel/3.0+1))*ln(10000)));
-        nodecnt:=node_count(tprocdef(procdefinition).inlininginfo^.code,limit);
+        nodecnt:=node_count(body,limit);
         result:=nodecnt<limit;
       end;
 
@@ -4889,6 +4961,15 @@ implementation
                   end;
                 para:=tcallparanode(para.nextpara);
               end;
+            { Account for the accepted inline against the enclosing proc's
+              cumulative growth. Only relevant when -OoINLINEGROWTHCAP is in
+              effect, but cheap to maintain unconditionally so a later
+              OPTIMIZATION directive sees an accurate counter. nodecnt is
+              capped at the cap_for_count we passed earlier, so it
+              under-counts on huge bodies; that bias is OK (the cap is
+              approximate by design). }
+            if (cnf_do_inline in callnodeflags) and assigned(current_procinfo) then
+              inc(current_procinfo.inline_growth,nodecnt);
           end;
       end;
 

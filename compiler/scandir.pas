@@ -1229,7 +1229,7 @@ unit scandir;
           recordpendingoptimizerswitches(init_settings.optimizerswitches)
         else
           begin
-            if not UpdateOptimizerStr(hs,current_settings.optimizerswitches) then
+            if not UpdateOptimizerStr(hs,current_settings) then
               Message1(scan_e_illegal_optimization_specifier,hs)
             else
               recordpendingoptimizerswitches(current_settings.optimizerswitches)
