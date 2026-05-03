@@ -323,7 +323,7 @@ interface
 implementation
 
     uses
-      systems,
+      systems,finput,
       verbose,globals,fmodule,ppu,
       aasmbase,aasmdata,
       symconst,defutil,defcmp,
