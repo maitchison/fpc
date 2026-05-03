@@ -774,13 +774,25 @@ interface
                             TCGREGCAPTURENODE
 *****************************************************************************}
 
-    { Inline-asm v2(d) splice tail. The preceding tasmnode just emitted the
-      callee's pure-asm body inside an alloc/dealloc-all-CPU-regs bracket,
-      so srcreg currently holds the value but the regalloc has marked it
-      free. Re-allocate srcreg, copy it into the temp's location (which the
-      preceding tcgtempcreatenode has materialised), then release it. The
-      reg's physical contents survive the alloc->free->alloc bracket because
-      no opcodes are emitted between dealloc and our re-alloc. }
+    { Inline-asm splice helper. Two directions:
+
+      rcd_capture (v2(d), post-asm-body): the preceding tasmnode just emitted
+        the callee's pure-asm body inside an alloc/dealloc-all-CPU-regs bracket,
+        so srcreg currently holds the funcret value but the regalloc has
+        marked it free. Re-allocate srcreg, copy it into the temp's location
+        (which the preceding tcgtempcreatenode has materialised), then
+        release it. The reg's physical contents survive the alloc->free->
+        alloc bracket because no opcodes are emitted between dealloc and our
+        re-alloc.
+
+      rcd_load (v2(c), pre-asm-body): the preceding tcgtempcreatenode has
+        materialised tempinfo, and an earlier tassignmentnode has stored the
+        para value into it. Allocate srcreg (the ABI register the asm body
+        expects for this para) and copy the temp into it. Critically we do
+        NOT ungetcpuregister: srcreg must stay live across the upcoming
+        tcgasmnode -- the asmnode's deallocallcpuregisters at end-of-body
+        is what frees it. (allocallcpuregisters at start-of-body skips regs
+        already owned, so re-arming an already-allocated reg is a no-op.) }
     procedure tcgregcapturenode.pass_generate_code;
       begin
         location_reset(location,LOC_VOID,OS_NO);
@@ -789,8 +801,18 @@ interface
         if not(ti_valid in ctempinfoaccessor.gettempinfoflags(tempinfo)) then
           internalerror(2026050304);
         cg.getcpuregister(current_asmdata.CurrAsmList,srcreg);
-        hlcg.a_load_reg_loc(current_asmdata.CurrAsmList,srcdef,srcdef,srcreg,tempinfo^.location);
-        cg.ungetcpuregister(current_asmdata.CurrAsmList,srcreg);
+        case direction of
+          rcd_capture:
+            begin
+              hlcg.a_load_reg_loc(current_asmdata.CurrAsmList,srcdef,srcdef,srcreg,tempinfo^.location);
+              cg.ungetcpuregister(current_asmdata.CurrAsmList,srcreg);
+            end;
+          rcd_load:
+            begin
+              hlcg.a_load_loc_reg(current_asmdata.CurrAsmList,srcdef,srcdef,tempinfo^.location,srcreg);
+              { intentionally NO ungetcpuregister -- see comment above. }
+            end;
+        end;
       end;
 
 

@@ -5704,6 +5704,7 @@ implementation
         para : tcallparanode;
         inlineblock,
         inlinecleanupblock : tblocknode;
+        paratempn : ttempcreatenode;
       begin
         result:=nil;
         if not(assigned(tprocdef(procdefinition).inlininginfo) and
@@ -5746,6 +5747,54 @@ implementation
         if pio_inline_asm in tprocdef(procdefinition).implprocoptions then
           inline_clone_asm_labels(body);
 
+        { v2(c): for each register-cc para, ensure the asm body sees the
+          argument value in its ABI register at body-entry. The asm body
+          never references the para via Pascal nodes (it just uses %eax/
+          %edx/%ecx directly), so replaceparaload above did nothing for
+          asm-inline paras. We have to materialise the binding ourselves.
+
+          Strategy: always force a value temp, even if createinlineparas
+          already created its own (or wrapped a complex by-address). The
+          wasted createinlineparas temp becomes dead and the optimiser
+          can collapse it; we just want a uniform "load tempinfo into
+          ABI reg" surface for tregcapturenode(rcd_load). para.left
+          already had firstpass run inside createinlineparas, so its
+          getcopy here is well-typed.
+
+          Cross-unit gotcha (same as v2(d)): paraloc[calleeside] is rebuilt
+          on demand via init_paraloc_info(calleeside). For asm-inline
+          callees loaded from a .ppu, the calleeside locations start out
+          unallocated -- force materialisation here. (For procs that have
+          a non-void register return, the v2(d) hook below will call this
+          again; it's idempotent.) }
+        if (pio_inline_asm in tprocdef(procdefinition).implprocoptions) and
+           (tprocdef(procdefinition).maxparacount>0) then
+          begin
+            tprocdef(procdefinition).init_paraloc_info(calleeside);
+            para:=tcallparanode(left);
+            while assigned(para) do
+              begin
+                if not(vo_is_hidden_para in para.parasym.varoptions) then
+                  begin
+                    paratempn:=ctempcreatenode.create(para.parasym.vardef,para.parasym.vardef.size,
+                      tt_persistent,true);
+                    if tabstractvarsym(para.parasym).varspez=vs_const then
+                      paratempn.includetempflag(ti_const);
+                    addstatement(inlineinitstatement,paratempn);
+                    addstatement(inlinecleanupstatement,ctempdeletenode.create(paratempn));
+                    addstatement(inlineinitstatement,
+                      cassignmentnode.create(ctemprefnode.create(paratempn),para.left.getcopy));
+                    addstatement(inlineinitstatement,
+                      cregcapturenode.create(
+                        paratempn.tempinfo,
+                        tparavarsym(para.parasym).paraloc[calleeside].location^.register,
+                        para.parasym.vardef,
+                        rcd_load));
+                  end;
+                para:=tcallparanode(para.right);
+              end;
+          end;
+
         { Concat the body and finalization parts }
         addstatement(inlineinitstatement,body);
 
@@ -5779,7 +5828,8 @@ implementation
               cregcapturenode.create(
                 ttemprefnode(funcretnode).tempinfo^.hookoncopy,
                 tprocdef(procdefinition).funcretloc[calleeside].location^.register,
-                tprocdef(procdefinition).returndef));
+                tprocdef(procdefinition).returndef,
+                rcd_capture));
           end;
 
         addstatement(inlineinitstatement,inlinecleanupblock);
