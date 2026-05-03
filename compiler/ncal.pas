@@ -5759,18 +5759,28 @@ implementation
           callinitblock.getcopy)"). The copy has a FRESH ttempinfo, and
           ttempcreatenode.dogetcopy left a hookoncopy pointer from the
           original tempinfo to the copy -- follow it so codegen sees the
-          tempinfo that ti_valid will actually be set on. }
+          tempinfo that ti_valid will actually be set on.
+
+          Cross-unit gotcha: only funcretloc[callerside] is serialised
+          to the PPU; funcretloc[calleeside] is rebuilt on demand via
+          init_paraloc_info(calleeside). For an inline-asm callee
+          loaded from a .ppu (e.g. SYSTEM's get_frame), calleeside
+          starts out with a nil location pointer until that init runs
+          -- so call it ourselves before reading the register. }
         if (pio_inline_asm in tprocdef(procdefinition).implprocoptions) and
            not is_void(tprocdef(procdefinition).returndef) and
            (cnf_return_value_used in callnodeflags) and
            assigned(funcretnode) and
            (funcretnode.nodetype=temprefn) and
            assigned(ttemprefnode(funcretnode).tempinfo^.hookoncopy) then
-          addstatement(inlineinitstatement,
-            cregcapturenode.create(
-              ttemprefnode(funcretnode).tempinfo^.hookoncopy,
-              tprocdef(procdefinition).funcretloc[calleeside].location^.register,
-              tprocdef(procdefinition).returndef));
+          begin
+            tprocdef(procdefinition).init_paraloc_info(calleeside);
+            addstatement(inlineinitstatement,
+              cregcapturenode.create(
+                ttemprefnode(funcretnode).tempinfo^.hookoncopy,
+                tprocdef(procdefinition).funcretloc[calleeside].location^.register,
+                tprocdef(procdefinition).returndef));
+          end;
 
         addstatement(inlineinitstatement,inlinecleanupblock);
         inlinecleanupblock:=nil;
