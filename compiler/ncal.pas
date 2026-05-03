@@ -4889,15 +4889,29 @@ implementation
                             hp:=tmodule(hp.next);
                           end;
                       end;
-                    if assigned(ownermod) and (ownermod.state<ms_compiled) then
+                    if assigned(ownermod) and (ownermod.state<ms_compiled) and
+                       (ownermod<>current_module) then
                       begin
+                        { Cross-unit inline whose provider's impl has
+                          not been compiled yet. With the new ctask
+                          scheduler this can happen even with a clean
+                          uses graph -- typically inside an SCC formed
+                          by an impl-only cycle (e.g. uA.impl uses uB
+                          AND uB.intf uses uA). Mark the call-node;
+                          pass_2 will codegen a plain CALL. Slice 1
+                          downgrades the diagnostic from 'body not
+                          stored' to a clearer note that names the
+                          provider; full retry+redo-codegen is a larger
+                          separately-shipped change. }
                         include(callnodeflags,cnf_inline_pending);
                         if assigned(current_procinfo) then
                           include(current_procinfo.flags,pi_has_pending_inline);
-                        Comment(V_lineinfo+V_Inline,'Deferring inline of "'+
+                        Comment(V_lineinfo+V_Inline,'Inline-defer note: "'+
                           tprocdef(procdefinition).procsym.realname+
-                          '"; provider unit '+ownermod.modulename^+
-                          ' state='+ownermod.statestr+' (will retry)');
+                          '" not inlined here -- provider unit '+
+                          ownermod.modulename^+' impl not yet compiled '+
+                          '(state='+ownermod.statestr+'); codegen as plain CALL. '+
+                          'See cs_opt_scc_inline_first.');
                         exit;
                       end;
                   end;
