@@ -3082,7 +3082,13 @@ const pemagic : array[0..3] of byte = (
                       PE_SCN_LNK_COMDAT or PE_SCN_ALIGN_MASK);
               end
             else
-              sechdr.flags:=djencodesechdrflags(SecOptions);
+              { exe section headers don't need alignment bits -- by the
+                time we're writing the executable the section addresses
+                are already finalised; the alignment hint only matters
+                in the .o where the linker reads it back to lay out
+                sections. PE strips PE_SCN_ALIGN_MASK above for the
+                same reason. }
+              sechdr.flags:=djencodesechdrflags(SecOptions,0);
             MaybeSwap(sechdr);
             FWriter.write(sechdr,sizeof(sechdr));
           end;
