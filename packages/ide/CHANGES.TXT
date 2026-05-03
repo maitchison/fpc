@@ -7,6 +7,39 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.21 / Compiler 3.3.7 ==
+
+Compiler
+  * Inline-asm bodies may now contain user-defined local labels and
+    branches between them. Previously `ait_label` was rejected outright
+    by the body-shape check; now labels are accepted, and at every call
+    site of an inline-asm proc the cloned tasmlist is post-processed by
+    nbas.inline_clone_asm_labels: a fresh tasmlabel is allocated via
+    current_asmdata.getjumplabel for each label DEFINITION, and every
+    in-body reference (branch operand or ait_const data sym) is
+    rewritten to point at the new label. Splicing the same body N
+    times into one caller now produces N distinct sets of labels
+    instead of an "duplicate label" assembler error. References to
+    symbols that are NOT defined inside the body (globals, typed-
+    consts, externals) are left untouched.
+
+    Example (still constrained to the v1+v2(a) zero-param/void-return
+    rules until v2(b)/v2(d) land):
+
+        var counter: longint;
+        procedure inc_to_eight; assembler; nostackframe; inline;
+        asm
+          movl counter, %eax
+        @loop:
+          cmpl $8, %eax
+          jge @done
+          incl %eax
+          jmp @loop
+        @done:
+          movl %eax, counter
+        end;
+
+
 == IDE 1.0.20 / Compiler 3.3.6 ==
 
 Compiler

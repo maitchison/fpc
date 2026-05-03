@@ -5730,6 +5730,15 @@ implementation
         foreachnodestatic(pm_postprocess,body,@setinlinelevel,pointer(inlinelevel+1));
         foreachnode(pm_preprocess,body,@replaceparaload,@fileinfo);
 
+        { For inline-asm procs, allocate fresh body-local tasmlabels and
+          rewrite all in-body references to point at them. Without this,
+          splicing the body N times into one caller would emit the same
+          .LjXX symbol N times -> assembler "duplicate label" error. The
+          rename is a no-op when the body has no ait_label, so it costs
+          essentially nothing for the common 0-label case. }
+        if pio_inline_asm in tprocdef(procdefinition).implprocoptions then
+          inline_clone_asm_labels(body);
+
         { Concat the body and finalization parts }
         addstatement(inlineinitstatement,body);
         addstatement(inlineinitstatement,inlinecleanupblock);
