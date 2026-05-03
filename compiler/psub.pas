@@ -279,11 +279,17 @@ implementation
       routine whose asm content is safe to splice into a caller. v2(d) scope:
       pure-asm + nostackframe, no parameters, return is either void OR a single
       integer-register result (we capture %funcret_reg into a temp post-splice).
-      Parameterised procs are deferred to v2(c). }
+      Parameterised procs are gated by the lazier pass1_inline-side validation
+      kept in ncal.pas (v2(c)) -- a permissive top-level gate would let RTL
+      pure-asm procs with QWord/var/untyped paras through and crash the
+      inliner. }
     function is_assembler_inlineable: boolean;
       var
         ok : boolean;
         cpi : tcgprocinfo;
+        i : longint;
+        p : tparavarsym;
+        pd : tprocdef;
       begin
         result:=false;
         if not (pi_is_assembler in current_procinfo.flags) then
@@ -295,17 +301,39 @@ implementation
         cpi:=tcgprocinfo(current_procinfo);
         if not assigned(cpi.code) then
           exit;
-        if current_procinfo.procdef.maxparacount<>0 then
-          exit;
-        if not is_void(current_procinfo.procdef.returndef) then
+        pd:=current_procinfo.procdef;
+        if not is_void(pd.returndef) then
           begin
-            { Only allow non-void returns whose ABI location is a single
-              integer register -- everything else (FPU stack, MM regs, multi-
-              register pairs, memory return via hidden funcret para) needs
-              machinery we don't have yet. }
-            if not paraloc_is_single_intreg(current_procinfo.procdef.funcretloc[calleeside]) then
+            if not paraloc_is_single_intreg(pd.funcretloc[calleeside]) then
               exit;
           end;
+        if pd.maxparacount>0 then
+          for i:=0 to pd.paras.count-1 do
+            begin
+              p:=tparavarsym(pd.paras[i]);
+              if not assigned(p) then
+                exit;
+              if vo_is_hidden_para in p.varoptions then
+                continue;
+              if not (p.varspez in [vs_value,vs_const]) then
+                exit;
+              if not assigned(p.vardef) then
+                exit;
+              if (p.vardef.typ=formaldef) or
+                 not (p.vardef.size in [1,2,4]) then
+                exit;
+              if not paraloc_is_single_intreg(p.paraloc[calleeside]) then
+                exit;
+              { Default-value paras (e.g. RTL `get_caller_addr(framebp; addr:pointer=nil)`)
+                make the inline call site emit a load of the default-const sym at the
+                caller, then my v2(c) hook hoists that into a temp + rcd_load into the
+                ABI register. The default-const path interacts badly with the ttemprefnode
+                PPU writer for the inlininginfo of these RTL helpers (uuchar.pp PPU
+                compile crashed at $004AD3A0/$004DB1FB on system.ppu re-load), so reject
+                here until that path is debugged. }
+              if assigned(p.defaultconstsym) then
+                exit;
+            end;
         ok:=true;
         foreachnodestatic(cpi.code,@gather_asmnode_check,@ok);
         result:=ok;

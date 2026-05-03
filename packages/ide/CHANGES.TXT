@@ -7,6 +7,49 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.23 / Compiler 3.3.9 ==
+
+Compiler
+  * Inline-asm functions may now take parameters that the calling
+    convention pins to a single integer register (typically the
+    `register;` cc on i386 -- first three integer args land in
+    `%eax`, `%edx`, `%ecx`). The asm body sees the para values
+    in those registers directly; there is no need to reference the
+    para name inside the body. Combined with v2(d), an inline-asm
+    proc can take register-cc paras AND return a value in a single
+    integer register, so e.g. `function add(a,b: longint): longint;
+    register; assembler; nostackframe; inline;` with body
+    `addl %edx, %eax` splices into the caller as a single `addl`
+    plus whatever the caller needs to load `a` and `b` into the
+    ABI registers.
+
+    The gate (`is_assembler_inlineable`) requires each non-hidden
+    para to have `varspez in [vs_value, vs_const]` and a calleeside
+    paraloc that's a single integer-class register. Stack-passed,
+    by-reference (`var`/`out`/`constref`), multi-register, and FPU/
+    MM-register paras are all rejected.
+
+    At splice time, `pass1_inline` calls `init_paraloc_info(calleeside)`
+    on the procdef (for cross-unit-loaded callees) and, for each
+    qualifying para, hoists the argument expression into a fresh
+    value temp (via `ctempcreatenode` + `cassignmentnode`), then
+    appends a `tregcapturenode(rcd_load)` that copies the temp into
+    the ABI register and intentionally omits the matching
+    `ungetcpuregister` -- the following tasmnode's
+    `deallocallcpuregisters` at end-of-body releases the reg.
+
+    Example:
+
+        function add(a, b: longint): longint;
+          register; assembler; nostackframe; inline;
+        asm
+          addl %edx, %eax
+        end;
+
+        var x: longint;
+        x := add(1, 2) + add(3, 4);   { four splices: 2 loads + 1 capture each }
+
+
 == IDE 1.0.22 / Compiler 3.3.8 ==
 
 Compiler

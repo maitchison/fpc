@@ -344,11 +344,25 @@ interface
          the surrounding inlineblock can yield the temp's value as the
          call expression's result. tempinfo points into a ttempcreatenode
          that is created and deleted inside the same inlineblock. }
+       { Direction tag for tregcapturenode.
+           rcd_capture -- v2(d) post-asm-body: copy a CPU reg into tempinfo's
+                          location. The asm body wrote to the funcret reg;
+                          we capture it before the dealloc-all-cpu-regs at
+                          the end of the asmnode lets the regalloc reuse it.
+           rcd_load    -- v2(c) pre-asm-body: copy tempinfo's location into
+                          a CPU reg (the ABI register the asm body expects
+                          for a register-cc para). The reg must remain live
+                          across the following asmnode -- pass_generate_code
+                          deliberately omits the matching ungetcpuregister so
+                          the asmnode's deallocallcpuregisters at end-of-body
+                          is what frees it. }
+       tregcapturedirection = (rcd_capture, rcd_load);
        tregcapturenode = class(tnode)
-          tempinfo : ptempinfo;
-          srcreg   : tregister;
-          srcdef   : tdef;
-          constructor create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef); virtual;
+          tempinfo  : ptempinfo;
+          srcreg    : tregister;
+          srcdef    : tdef;
+          direction : tregcapturedirection;
+          constructor create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef; _direction: tregcapturedirection); virtual;
           constructor ppuload(t:tnodetype;ppufile:tcompilerppufile);override;
           procedure ppuwrite(ppufile:tcompilerppufile);override;
           function dogetcopy: tnode; override;
@@ -1992,12 +2006,13 @@ implementation
                             TREGCAPTURENODE
 *****************************************************************************}
 
-    constructor tregcapturenode.create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef);
+    constructor tregcapturenode.create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef; _direction: tregcapturedirection);
       begin
         inherited create(regcapturen);
         tempinfo:=_tempinfo;
         srcreg:=_srcreg;
         srcdef:=_srcdef;
+        direction:=_direction;
       end;
 
 
@@ -2023,6 +2038,7 @@ implementation
         n.tempinfo:=tempinfo;
         n.srcreg:=srcreg;
         n.srcdef:=srcdef;
+        n.direction:=direction;
         result:=n;
       end;
 
