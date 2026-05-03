@@ -379,7 +379,18 @@ interface
          cs_opt_use_load_modify_store,
          cs_opt_unused_para,
          cs_opt_consts,
-         cs_opt_forloop
+         cs_opt_forloop,
+         { Inline-deferral mode. The ctask scheduler may compile a
+           consumer's impl before the provider unit's impl has
+           compiled; cross-unit inline calls then see has_inlininginfo
+           still empty and codegen emits a CALL instead of splicing
+           the inline body. With this mode on, codegen of the
+           containing function is deferred until the provider's impl
+           finishes; the call-node is then re-checked and codegen runs
+           with the inline expanded. The classic depth-first scheduler
+           did not need this -- it compiled provider impls before
+           consumer impls by construction. }
+         cs_opt_scc_inline_first
        );
        toptimizerswitches = set of toptimizerswitch;
 
@@ -453,7 +464,8 @@ interface
          'ORDERFIELDS','FASTMATH','DEADVALUES','REMOVEEMPTYPROCS',
          'CONSTPROP',
          'DEADSTORE','FORCENOSTACKFRAME','USELOADMODIFYSTORE',
-         'UNUSEDPARA','CONSTS','FORLOOP'
+         'UNUSEDPARA','CONSTS','FORLOOP',
+         'SCCINLINEFIRST'
        );
        WPOptimizerSwitchStr : array [twpoptimizerswitch] of string[14] = (
          'DEVIRTCALLS','OPTVMTS','SYMBOLLIVENESS'
@@ -482,8 +494,10 @@ interface
          (name: 'SATURATINGFLOATTOINT';hasvalue: false; isglobal: false; define: 'FPC_WASM_SATURATING_FLOAT_TO_INT')
        );
 
-       { switches being applied to all CPUs at the given level }
-       genericlevel1optimizerswitches = [cs_opt_level1,cs_opt_peephole];
+       { switches being applied to all CPUs at the given level.
+         cs_opt_scc_inline_first is in level1 so any -O1+ build gets
+         the SCC inline-deferral fix; -O- (level0) drops it. }
+       genericlevel1optimizerswitches = [cs_opt_level1,cs_opt_peephole,cs_opt_scc_inline_first];
        genericlevel2optimizerswitches = [cs_opt_level2,cs_opt_remove_empty_proc,cs_opt_unused_para];
        genericlevel3optimizerswitches = [cs_opt_level3,cs_opt_constant_propagate,cs_opt_nodedfa,cs_opt_loopstrength
                                          {$ifndef llvm},cs_opt_use_load_modify_store{$endif},
@@ -836,7 +850,13 @@ interface
          { set if no frame pointer is needed, the rules when this applies is target specific }
          pi_no_framepointer_needed,
          { procedure has been normalized so no expressions contain block nodes }
-         pi_normalized
+         pi_normalized,
+         { at least one call-node in the body was tagged
+           cnf_inline_pending by check_inlining (provider unit's impl
+           hadn't compiled yet). Slice 2 of the inline-deferral mode
+           uses this to defer codegen of this procinfo until the
+           provider unit's impl finishes. }
+         pi_has_pending_inline
        );
        tprocinfoflags=set of tprocinfoflag;
 
