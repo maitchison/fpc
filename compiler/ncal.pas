@@ -5753,15 +5753,22 @@ implementation
           left its result in the funcret CPU register; copy it into the
           funcret temp so the inlineblock's trailing temprefnode evaluates
           to that value. funcret_can_be_reused has been disabled for asm-
-          inline procs above, so funcretnode is always a temprefn here. }
+          inline procs above, so funcretnode is always a temprefn here.
+          The funcret temp's ttempcreatenode lives inside callinitblock,
+          which we copied above (line "addstatement(inlineinitstatement,
+          callinitblock.getcopy)"). The copy has a FRESH ttempinfo, and
+          ttempcreatenode.dogetcopy left a hookoncopy pointer from the
+          original tempinfo to the copy -- follow it so codegen sees the
+          tempinfo that ti_valid will actually be set on. }
         if (pio_inline_asm in tprocdef(procdefinition).implprocoptions) and
            not is_void(tprocdef(procdefinition).returndef) and
            (cnf_return_value_used in callnodeflags) and
            assigned(funcretnode) and
-           (funcretnode.nodetype=temprefn) then
+           (funcretnode.nodetype=temprefn) and
+           assigned(ttemprefnode(funcretnode).tempinfo^.hookoncopy) then
           addstatement(inlineinitstatement,
             cregcapturenode.create(
-              ttemprefnode(funcretnode).tempinfo,
+              ttemprefnode(funcretnode).tempinfo^.hookoncopy,
               tprocdef(procdefinition).funcretloc[calleeside].location^.register,
               tprocdef(procdefinition).returndef));
 
