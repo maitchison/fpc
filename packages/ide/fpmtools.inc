@@ -383,7 +383,18 @@ end;
 
 
 procedure TIDEApp.DoFindInFiles;
+var
+  CurWord: string;
 begin
+  { Seed the search field with the word under the cursor (incl. '_').
+    Falls back to the previous SearchStr when the cursor isn't on a word. }
+  if (DeskTop^.Current<>nil) and
+     (DeskTop^.Current^.HelpCtx=hcSourceWindow) then
+    begin
+      CurWord:=PSourceWindow(DeskTop^.Current)^.Editor^.GetCurrentWord;
+      if CurWord<>'' then
+        FindInFilesRec.SearchStr:=Copy(CurWord,1,FindInFilesStrSize);
+    end;
   if not ExecuteFindInFilesDialog then
     Exit;
   Messages;
