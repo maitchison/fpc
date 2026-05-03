@@ -361,10 +361,23 @@ interface
        { same as above, but create a regular temp rather than reference temp }
        function maybereplacewithtemp(var n: tnode; var block: tblocknode; var stat: tstatementnode; size: ASizeInt; allowreg: boolean): ttempcreatenode;
 
+       { Walks the cloned tasmlist of an inlined-asm splice and replaces every
+         body-local tasmlabel definition with a freshly allocated one, then
+         rewrites all references (branch targets, ait_const data syms) to point
+         at the new label. Each call site of an inline-asm proc must call this
+         on its cloned asmnodes so that splicing N copies into one caller does
+         not produce N definitions of the same .LjXX symbol. References to
+         symbols that are NOT defined inside this body (globals, typed-consts,
+         labels in other procs) are left untouched. Walks all asmnodes
+         contained inside `n`. }
+       procedure inline_clone_asm_labels(n: tnode);
+
 implementation
 
     uses
       verbose,globals,systems,
+      cclasses,
+      aasmbase,
       ppu,
       symsym,symconst,symdef,defutil,defcmp,
       pass_1,
@@ -448,6 +461,106 @@ implementation
             addstatement(stat,result)
           end;
       end;
+
+
+    { Internal: rename body-local labels in a single tasmnode's tasmlist. Two
+      passes: pass 1 finds every label DEFINITION, allocates a fresh tasmlabel
+      via current_asmdata.getjumplabel, and rewrites tai_label.labsym to the
+      new label, building a name->newlabel map. Pass 2 walks every operand and
+      ait_const data sym; any reference whose symbol name is in the map gets
+      rewritten to point at the new label. Symbols that are not in the map
+      (globals, typed-consts, externals) are left untouched. }
+    procedure clone_one_asmnode_labels(an: tasmnode);
+      var
+        hp        : tai;
+        ai        : tai_cpu_abstract;
+        i         : longint;
+        labmap    : TFPHashList;
+        newlab    : tasmlabel;
+        oldlab    : tasmlabel;
+        existing  : pointer;
+      begin
+        if not assigned(an) or not assigned(an.p_asm) then
+          exit;
+        labmap:=TFPHashList.Create;
+        try
+          { Pass 1: rename label definitions. }
+          hp:=tai(an.p_asm.first);
+          while assigned(hp) do
+            begin
+              if hp.typ=ait_label then
+                begin
+                  oldlab:=tai_label(hp).labsym;
+                  if not assigned(oldlab) then
+                    begin
+                      hp:=tai(hp.next);
+                      continue;
+                    end;
+                  existing:=labmap.Find(oldlab.name);
+                  if existing=nil then
+                    begin
+                      current_asmdata.getjumplabel(newlab);
+                      newlab.increfs;
+                      labmap.Add(oldlab.name,newlab);
+                    end
+                  else
+                    newlab:=tasmlabel(existing);
+                  tai_label(hp).labsym:=newlab;
+                  newlab.is_set:=true;
+                end;
+              hp:=tai(hp.next);
+            end;
+          { Pass 2: rewrite references inside instruction operands and
+            ait_const data syms. }
+          hp:=tai(an.p_asm.first);
+          while assigned(hp) do
+            begin
+              case hp.typ of
+                ait_instruction:
+                  begin
+                    ai:=tai_cpu_abstract(hp);
+                    for i:=0 to ai.ops-1 do
+                      if (ai.oper[i]^.typ=top_ref) and
+                         assigned(ai.oper[i]^.ref^.symbol) then
+                        begin
+                          existing:=labmap.Find(ai.oper[i]^.ref^.symbol.name);
+                          if assigned(existing) then
+                            ai.oper[i]^.ref^.symbol:=tasmsymbol(existing);
+                        end;
+                  end;
+                ait_const:
+                  if assigned(tai_const(hp).sym) then
+                    begin
+                      existing:=labmap.Find(tai_const(hp).sym.name);
+                      if assigned(existing) then
+                        tai_const(hp).sym:=tasmsymbol(existing);
+                    end;
+                else
+                  ;
+              end;
+              hp:=tai(hp.next);
+            end;
+        finally
+          labmap.Free;
+        end;
+      end;
+
+
+    function clone_asm_labels_visitor(var n: tnode; arg: pointer): foreachnoderesult;
+      begin
+        result:=fen_true;
+        if n.nodetype=asmn then
+          clone_one_asmnode_labels(tasmnode(n));
+      end;
+
+
+    procedure inline_clone_asm_labels(n: tnode);
+      begin
+        if not assigned(n) then
+          exit;
+        foreachnodestatic(n,@clone_asm_labels_visitor,nil);
+      end;
+
 
 {*****************************************************************************
                              TFIRSTNOTHING

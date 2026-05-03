@@ -173,13 +173,16 @@ implementation
        ;
 
     { Walks the proc body looking for asmnodes; checks every tai inside is
-      safe to splice into a caller. v2 rules: no labels (named or local), no
-      operands referencing locals/params. Symbol-bearing references and
-      symbol-bearing data constants ARE allowed -- asmsymbols are unit-
-      global and survive same-unit and cross-unit cloning via
-      tai_cpu_abstract.ppuwriteoper / putasmsymbol. Returns true only if
-      every asmnode found passes; an empty walk (no asmnodes) also returns
-      true. }
+      safe to splice into a caller. v2 rules so far: no operands referencing
+      locals/params (top_local). Symbol-bearing references, symbol-bearing
+      data constants, and labels ARE allowed. asmsymbols are unit-global
+      and survive same-unit and cross-unit cloning via
+      tai_cpu_abstract.ppuwriteoper / putasmsymbol. Body-local tasmlabels
+      (ait_label and any branch operand pointing at one) are renamed per
+      call site by inline_clone_asm_labels in nbas.pas, so multiple splices
+      of the same body do not collide on the same .LjXX symbol. Returns
+      true only if every asmnode found passes; an empty walk (no asmnodes)
+      also returns true. }
     function asmnode_inline_safe(p: tasmnode): boolean;
       var
         hp : tai;
@@ -200,7 +203,8 @@ implementation
               ait_regalloc,
               ait_tempalloc,
               ait_align,
-              ait_comment:
+              ait_comment,
+              ait_label:
                 ;
               ait_instruction:
                 begin
@@ -210,7 +214,10 @@ implementation
                       { Whitelist of operand kinds known safe to splice.
                         top_ref with a symbol attached is fine: asmsymbols
                         live at unit scope, getcopy preserves the pointer,
-                        and the PPU writer/reader round-trips them. }
+                        and the PPU writer/reader round-trips them. Branch
+                        targets are top_ref with ref^.symbol pointing at a
+                        tasmlabel -- handled the same way, with per-splice
+                        rename applied at call-site time. }
                       if ai.oper[i]^.typ in [top_none,top_reg,top_const,top_bool,top_ref] then
                         continue;
                       { top_local + any non-x86 operand kind not whitelisted above }
