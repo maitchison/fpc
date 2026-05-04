@@ -82,7 +82,17 @@ interface
           Scanner state: type fully consumed; next token is whatever
           follows the type (modifier keyword, `;', `)', `=' for default).
           Used by feature/dynamic-params for `T specialize [set]'. }
-        pp_at_param_modifier
+        pp_at_param_modifier,
+        { Just after a procedure/function body has been parsed and the
+          procdef is fully populated (procdef.is_implemented = true).
+          Scanner state: at whatever follows the proc's terminating
+          `end;' -- typically the next top-level decl or implementation
+          item. The procdef's symbol tables are still on the stack;
+          generictokenbuf (if recorded) is fully captured and owned
+          by the procdef.
+          Used by feature/dynamic-params and feature/codegen-proc for
+          post-body lowering (generate companion declarations, etc.). }
+        pp_after_proc_body
       );
 
       { Origin record describing where a synthetic buffer came from. }
@@ -158,6 +168,52 @@ interface
     { ---- transform (read/write helpers; expanded in PP-3) ---- }
 
     function  ppreproc_clone(src: tppreproc_buf): tppreproc_buf;
+
+    { ---- synthesise tokens directly into a buffer ----
+
+      These helpers append individual tokens to a buffer without going
+      through the scanner. They write the same wire format that
+      tscannerfile.recordtoken produces, so the buffer can be replayed
+      with ppreproc_inject and the parser will see the synthesised
+      tokens as if the user had written them.
+
+      No position markers are emitted -- replay leaves current_tokenpos
+      at whatever it was when injection started. If you need synthesised
+      tokens to report at a specific user-source position, set
+      current_filepos before injecting; the parser will see that as the
+      position of every synthesised token until the buffer is exhausted.
+
+      Settings markers are also not emitted -- replay uses the scanner's
+      current_settings at injection time. Don't synthesise tokens that
+      depend on a different mode-switch state than the surrounding
+      source. }
+
+    { Append a punctuation/operator token (`:', `;', `(', `<', etc.).
+      Sets idtoken=_NOID, matching the scanner's behaviour for non-
+      identifier characters. }
+    procedure ppreproc_emit_punct(buf: tppreproc_buf; t: ttoken);
+
+    { Append a keyword token (`begin', `case', `of', `end', ...).
+      Sets idtoken=token, matching the scanner's behaviour when an
+      identifier text matches a reserved word in the active mode. }
+    procedure ppreproc_emit_keyword(buf: tppreproc_buf; t: ttoken);
+
+    { Append a regular identifier (token=_ID, idtoken=_ID). The name
+      is stored as-is in orgpattern; replay will set pattern :=
+      upper(orgpattern). }
+    procedure ppreproc_emit_ident(buf: tppreproc_buf; const name: ansistring);
+
+    { Append an identifier whose idtoken is a contextual keyword
+      (e.g. `specialize' arrives as token=_ID, idtoken=_SPECIALIZE).
+      Use this when the parser checks idtoken to recognise the word. }
+    procedure ppreproc_emit_ident_as(buf: tppreproc_buf;
+                                     const name: ansistring;
+                                     contextual_idtoken: ttoken);
+
+    { Append an integer literal token (token=_INTCONST, idtoken=_NOID).
+      The value is serialised as its decimal string representation,
+      matching what the scanner stores in `pattern' for _INTCONST. }
+    procedure ppreproc_emit_intliteral(buf: tppreproc_buf; n: int64);
 
     { ---- inject ---- }
 
@@ -319,6 +375,94 @@ implementation
             result.data.write(b, 1);
           end;
         src.data.seek(savepos);
+      end;
+
+    { -------------- emit helpers -------------- }
+
+    { Write a single ttoken to a dynamic array using scanner.pas's
+      packed wire format: tokens with ord <= $7f take 1 byte;
+      tokens > $7f take 2 bytes (high byte with $80 set, then low). }
+    procedure write_token_raw(d: tdynamicarray; t: ttoken);
+      var
+        b: byte;
+      begin
+        if ord(t) > $7f then
+          begin
+            b := (ord(t) shr 8) or $80;
+            d.write(b, 1);
+          end;
+        b := ord(t) and $ff;
+        d.write(b, 1);
+      end;
+
+    { Append a shortstring's length byte + payload (matches the format
+      recordtoken uses for _ID orgpattern and _INTCONST pattern). }
+    procedure write_shortstring_raw(d: tdynamicarray; const s: shortstring);
+      var
+        len: byte;
+      begin
+        len := length(s);
+        d.write(len, 1);
+        if len > 0 then
+          d.write(s[1], len);
+      end;
+
+    procedure ppreproc_emit_punct(buf: tppreproc_buf; t: ttoken);
+      begin
+        if not assigned(buf) then
+          internalerror(2026050410);
+        write_token_raw(buf.data, t);
+        write_token_raw(buf.data, _NOID);
+      end;
+
+    procedure ppreproc_emit_keyword(buf: tppreproc_buf; t: ttoken);
+      begin
+        if not assigned(buf) then
+          internalerror(2026050411);
+        write_token_raw(buf.data, t);
+        write_token_raw(buf.data, t);
+      end;
+
+    procedure ppreproc_emit_ident(buf: tppreproc_buf; const name: ansistring);
+      var
+        s: shortstring;
+      begin
+        if not assigned(buf) then
+          internalerror(2026050412);
+        if length(name) > 255 then
+          internalerror(2026050413);
+        s := name;
+        write_token_raw(buf.data, _ID);
+        write_token_raw(buf.data, _ID);
+        write_shortstring_raw(buf.data, s);
+      end;
+
+    procedure ppreproc_emit_ident_as(buf: tppreproc_buf;
+                                     const name: ansistring;
+                                     contextual_idtoken: ttoken);
+      var
+        s: shortstring;
+      begin
+        if not assigned(buf) then
+          internalerror(2026050414);
+        if length(name) > 255 then
+          internalerror(2026050415);
+        s := name;
+        write_token_raw(buf.data, _ID);
+        write_token_raw(buf.data, contextual_idtoken);
+        write_shortstring_raw(buf.data, s);
+      end;
+
+    procedure ppreproc_emit_intliteral(buf: tppreproc_buf; n: int64);
+      var
+        s: shortstring;
+      begin
+        if not assigned(buf) then
+          internalerror(2026050416);
+        str(n, s);
+        write_token_raw(buf.data, _INTCONST);
+        write_token_raw(buf.data, _NOID);
+        write_shortstring_raw(buf.data, s);
       end;
 
     { -------------- inject -------------- }

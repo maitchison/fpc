@@ -163,7 +163,9 @@ implementation
        optconstprop,
        optdeadstore,
        optloadmodifystore,
-       optutils
+       optutils,
+       { sugar features }
+       ppreproc
 {$if defined(arm) or defined(m68k)}
        ,cpuinfo
 {$endif defined(arm) or defined(m68k)}
@@ -2707,6 +2709,13 @@ implementation
          { the procedure is now defined }
          procdef.forwarddef:=false;
          procdef.is_implemented:=true;
+
+         { ppreproc dispatch point: pp_after_proc_body.
+           Body is parsed; procdef fully populated. Sugar features
+           that need to generate companion declarations (e.g.
+           specialize-set's dispatch stub) hook here.
+           No-op when no passes are registered for this point. }
+         ppreproc_try_dispatch(pp_after_proc_body);
 
          if assigned(code) then
            begin
