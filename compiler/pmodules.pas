@@ -35,6 +35,13 @@ uses fmodule;
     function proc_program_declarations(curr : tmodule; islibrary : boolean) : boolean;
     function finish_compile_unit(module:tmodule): boolean;
     function finish_unit(module:tmodule): boolean;
+    { ms_compiling_waitinlines drain entry. Called from ctask when all SCC peers'
+      impls are loaded; drains pending_inline_procinfos and finishes the
+      previously-deferred portion of finish_compile_unit (create_dwarf_frame,
+      create_objectfile, CRC handling, finish_unit). }
+    function finish_compile_unit_after_inlines(module: tmodule): boolean;
+    { Idempotent if the module has no pending list. Exposed for safety. }
+    procedure drain_pending_inlines(curr: tmodule);
 
 implementation
 
@@ -46,8 +53,8 @@ implementation
        symconst,symbase,symtype,symdef,symsym,symtable,defutil,symcreat,
        wpoinfo,
        aasmtai,aasmdata,aasmbase,aasmcpu,
-       cgbase,ngenutil,
-       nbas,nutils,ncgutil,
+       cgbase,ngenutil,hlcgobj,
+       node,nbas,nutils,ncgutil,ncal,
        link,assemble,import,export,gendef,ppu,comprsrc,dbgbase,
        cresstr,procinfo,
        objcgutl,
@@ -126,6 +133,238 @@ implementation
         { resource files }
         CompileResourceFiles;
       end;
+
+
+    {*****************************************************************************
+                       SCC inline-deferral drain
+     *****************************************************************************}
+
+    { forward references to procedures defined later in this implementation
+      section; finish_compile_unit_after_inlines runs the same tail as the
+      ag-branch of finish_compile_unit. }
+    procedure create_dwarf_frame; forward;
+
+    type
+      tinline_retry_state = record
+        retried : longint;             { sites we'd inline now }
+        unresolved : longint;          { sites still missing impl }
+      end;
+      pinline_retry_state = ^tinline_retry_state;
+
+    function count_pending_inlines(var n: tnode; arg: pointer): foreachnoderesult;
+    { Walk callback for foreachnodestatic. For each cnf_inline_pending callnode,
+      checks whether the provider's procdef now has inlininginfo (impl finished
+      compiling between deferral and drain). Counts only -- doesn't mutate the
+      AST. }
+    var
+      cn: tcallnode;
+      st: pinline_retry_state;
+    begin
+      result:=fen_true;
+      if n.nodetype<>calln then exit;
+      cn:=tcallnode(n);
+      if not (cnf_inline_pending in cn.callnodeflags) then exit;
+      st:=pinline_retry_state(arg);
+      if (cn.procdefinition.typ=procdef) and
+         tprocdef(cn.procdefinition).has_inlininginfo then
+        inc(st^.retried)
+      else
+        inc(st^.unresolved);
+    end;
+
+    function strip_pass1_done(var n: tnode; arg: pointer): foreachnoderesult;
+    { Walk callback: clear tnf_pass1_done so firstpass re-runs on this node.
+      Used by the SCC regen path to wake up cnf_inline_pending callnodes
+      (and their ancestors so the pass walk actually descends to them). }
+    begin
+      result:=fen_true;
+      exclude(n.transientflags,tnf_pass1_done);
+    end;
+
+    function count_inlined_after_regen(var n: tnode; arg: pointer): foreachnoderesult;
+    { Counts cnf_do_inline calls in the post-regen tree. If pass1_inline ran,
+      it replaced the original calln with an inlineblock and the calln no
+      longer appears -- so this counts UN-inlined leftovers, while
+      pi_count_did_inline (set in psub) tracks the ones that did fire. }
+    var
+      cn: tcallnode;
+      st: pinline_retry_state;
+    begin
+      result:=fen_true;
+      if n.nodetype<>calln then exit;
+      cn:=tcallnode(n);
+      st:=pinline_retry_state(arg);
+      if cnf_inline_pending in cn.callnodeflags then
+        inc(st^.unresolved);
+    end;
+
+    function regenerate_pi_with_inlines(pi: tcgprocinfo): boolean;
+    { Re-runs tcgprocinfo.generate_code on a fresh AST copy of pi.ast_snapshot.
+      The first generate_code emitted plain CALLs because cnf_inline_pending was
+      set on call sites whose provider impls hadn't compiled yet. Now that the
+      drain has confirmed at least one of those providers has inlininginfo, we
+      throw away the original aktproccode and start over -- pass_1's
+      check_inlining will see has_inlininginfo=true this time and pass1_inline
+      will splice the body in the standard way. Returns true if regen succeeded
+      and the procinfo has been recorded; false if the snapshot was missing or
+      regen produced nothing usable. Caller has already set current_module. }
+    begin
+      result:=false;
+      if not assigned(pi.ast_snapshot) then exit;
+
+      { Free the post-pass_2 AST; replace with a fresh copy of the snapshot. }
+      if assigned(pi.code) then
+        begin
+          pi.code.free;
+          pi.code:=nil;
+        end;
+      pi.code:=pi.ast_snapshot.getcopy;
+
+      { Reset pass_2 leftovers. tg/dfabuilder are nil after first pass_2.
+        aktproccode/aktlocaldata still hold the previous CALL emission --
+        free them so generate_code starts with empty lists. }
+      if assigned(pi.aktproccode) then
+        pi.aktproccode.free;
+      pi.aktproccode:=TAsmList.create;
+      if assigned(pi.aktlocaldata) then
+        pi.aktlocaldata.free;
+      pi.aktlocaldata:=TAsmList.create;
+
+      { Clear the deferral flag so generate_code's check at the bottom takes
+        the normal record_generated_code_for_procdef branch this time. We
+        also clear pi_has_pending_inline -- pass_1 will re-set it only if
+        some OTHER provider (different from the one we just resolved) is
+        still unfinished. The SCC state machine guarantees all peers are
+        at ms_compiling_waitfinish or later by the time we drain, so the
+        rest are providers from outside the SCC that genuinely haven't
+        compiled (extremely rare; we'll re-defer them and final-drain). }
+      pi.scc_defer_active:=false;
+      exclude(pi.flags,pi_has_pending_inline);
+
+      { Strip tnf_pass1_done from every node so do_firstpass re-runs.
+        The re-run will see cnf_inline_pending callnodes whose providers now
+        have inlininginfo, take the natural inline path (cnf_do_inline +
+        pass1_inline) and splice the body in. Other nodes hit the early-
+        exit again on second pass since they idempotently retain their
+        post-firstpass state. }
+      foreachnodestatic(pi.code,@strip_pass1_done,nil);
+      pi.scc_regen_mode:=true;
+      try
+        pi.generate_code;
+      finally
+        pi.scc_regen_mode:=false;
+      end;
+      result:=not pi.scc_defer_active;
+    end;
+
+    procedure record_pi_unchanged(pi: tcgprocinfo);
+    { Final-drain path: no provider became available, so just hand the original
+      aktproccode (with plain CALLs) over to current_asmdata. The cnf_inline_pending
+      callsites stay un-inlined this build, same as today. }
+    begin
+      if assigned(pi.aktproccode) then
+        hlcg.record_generated_code_for_procdef(pi.procdef,pi.aktproccode,pi.aktlocaldata);
+      pi.scc_defer_active:=false;
+    end;
+
+    procedure drain_pending_inlines(curr: tmodule);
+    { Called from continue_module(ms_compiling_waitinlines). All SCC peers are
+      at ms_compiling_waitfinish or later, so every provider's inlininginfo is
+      loaded. For each parked procinfo, retry the inlines; re-emit if any
+      provider became available, else just record the original asm. }
+    var
+      i: longint;
+      pi: tcgprocinfo;
+      st: tinline_retry_state;
+      old_module: tmodule;
+      total_pi, total_retried: longint;
+    begin
+      if not assigned(curr.pending_inline_procinfos) or
+         (curr.pending_inline_procinfos.Count=0) then
+        exit;
+      total_pi:=0; total_retried:=0;
+
+      old_module:=current_module;
+      set_current_module(curr);
+      try
+        for i:=0 to curr.pending_inline_procinfos.Count-1 do
+          begin
+            pi:=tcgprocinfo(curr.pending_inline_procinfos[i]);
+            FillChar(st,sizeof(st),0);
+            if assigned(pi.code) then
+              foreachnodestatic(pi.code,@count_pending_inlines,@st);
+            { Skip procinfos whose procdef has been NIL'd between deferral
+              and drain. Can happen for procinfos that get torn down by
+              specialization/generic processing. The deferral guard already
+              restricts to top-level procinfos to minimise this risk. }
+            { Skip stale procinfos (procdef NIL'd by specialization processing). }
+            if (pi.procdef=nil) or (pi.procdef.procsym=nil) then
+              continue;
+            inc(total_pi);
+            inc(total_retried,st.retried);
+            { NOTE: regenerate_pi_with_inlines is currently disabled --
+              re-running pass_1 on a pass1-stripped snapshot triggers AVs
+              in nodes with rich state (e.g. callnodes that hit objc /
+              maybe_load_in_temp / hidden-param paths). The drain still
+              counts the would-be-retry callsites so the opportunity is
+              visible in the log; the original aktproccode (with plain
+              CALLs) is recorded unchanged. Future work: targeted
+              inline-only splice that doesn't re-run pass_1. }
+            record_pi_unchanged(pi);
+          end;
+        curr.pending_inline_procinfos.Clear;
+        { Diagnostic so the SCC opportunity is visible in -vY logs even though
+          regeneration is currently disabled. parked=N procinfos held back from
+          immediate record; retried_callsites=N callsites where the provider
+          impl became available after deferral and would inline if regenerate
+          were enabled. }
+        if total_pi > 0 then
+          Comment(V_Inline,'SCC inline drain: module='+curr.realmodulename^+
+            ' parked='+tostr(total_pi)+
+            ' would-inline-callsites='+tostr(total_retried)+
+            ' (regen disabled; recorded as plain CALLs)');
+      finally
+        set_current_module(old_module);
+      end;
+    end;
+
+
+    function finish_compile_unit_after_inlines(module: tmodule): boolean;
+    { ms_compiling_waitinlines second pass. Mirrors the deferred tail of
+      finish_compile_unit: drain pending inlines, then create_dwarf_frame,
+      create_objectfile, remove_all_waitsforthisunit, CRC handling. }
+    var
+      old_module: tmodule;
+    begin
+      result:=true;
+      old_module:=current_module;
+      set_current_module(module);
+
+      drain_pending_inlines(module);
+
+      create_dwarf_frame;
+      create_objectfile(module);
+
+      module.remove_all_waitsforthisunit;
+
+      if ErrorCount=0 then
+        begin
+          if not module.are_all_used_units_compiled then
+            begin
+              {$IF defined(Debug_WaitCRC) or defined(Debug_FreeParseMem)}
+              writeln('finish_compile_unit_after_inlines ',module.realmodulename^,' waiting for used unit CRCs...');
+              {$ENDIF}
+              tppumodule(module).getppucrc;
+              module.crc_final:=true;
+              module.state:=ms_compiled_waitcrc;
+              set_current_module(old_module);
+              exit(false);
+            end;
+        end;
+      set_current_module(old_module);
+
+      result:=finish_unit(module);
+    end;
 
 
     procedure insertobjectfile(curr : tmodule);
@@ -1544,6 +1783,7 @@ type
         ag : boolean;
         finishstate : tfinishstate;
         old_module: tmodule;
+        firstwaitinginlines : tmodule;
       begin
          result:=true;
          { curr is now module }
@@ -1741,6 +1981,30 @@ type
              module.headerflags:=module.headerflags or uf_no_link;
              exclude(module.moduleflags,mf_has_stabs_debuginfo);
              exclude(module.moduleflags,mf_has_dwarf_debuginfo);
+           end;
+
+         { SCC inline-deferral: handle parked procinfos before .o emission. }
+         if assigned(module.pending_inline_procinfos) and
+            (module.pending_inline_procinfos.Count>0) then
+           begin
+             { For an assembler-generated module whose SCC peers haven't
+               finished their impls yet, defer the drain (and the rest of
+               create_dwarf_frame + create_objectfile) to
+               continue_module(ms_compiling_waitinlines). For non-ag modules
+               there's nothing to wait on -- just drain immediately so the
+               procinfos are released. }
+             if ag then
+               begin
+                 if not module.scc_peers_impls_done(firstwaitinginlines) then
+                   begin
+                     module.state:=ms_compiling_waitinlines;
+                     set_current_module(old_module);
+                     exit(false);
+                   end;
+                 drain_pending_inlines(module);
+               end
+             else
+               drain_pending_inlines(module);
            end;
 
          if ag then

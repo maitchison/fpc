@@ -363,6 +363,7 @@ begin
       ms_compiling_waitintf : cancontinue:=m.usedunitsloaded(true,firstwaiting);
       ms_compiling_waitimpl : cancontinue:=m.usedunitsloaded(false,firstwaiting);
       ms_compiling_waitfinish : cancontinue:=m.nowaitingforunits(firstwaiting);
+      ms_compiling_waitinlines : cancontinue:=m.scc_peers_impls_done(firstwaiting);
       ms_compiled_waitcrc : cancontinue:=m.usedunitsfinalcrc(firstwaiting);
       ms_compiled,
       ms_processed,
@@ -428,6 +429,7 @@ begin
     ms_compiling_waitintf : pmodules.parse_unit_interface_declarations(m);
     ms_compiling_waitimpl : pmodules.proc_unit_implementation(m);
     ms_compiling_waitfinish : pmodules.finish_compile_unit(m);
+    ms_compiling_waitinlines : pmodules.finish_compile_unit_after_inlines(m);
     ms_compiled_waitcrc : pmodules.finish_unit(m);
     ms_processed : ;
   else

@@ -390,7 +390,18 @@ interface
            with the inline expanded. The classic depth-first scheduler
            did not need this -- it compiled provider impls before
            consumer impls by construction. }
-         cs_opt_scc_inline_first
+         cs_opt_scc_inline_first,
+         { Slice 2 deferral path on top of cs_opt_scc_inline_first.
+           When set, generate_code parks the procinfo on
+           current_module.pending_inline_procinfos instead of immediately
+           recording its aktproccode; finish_compile_unit then transitions
+           to ms_compiling_waitinlines and the drain in
+           finish_compile_unit_after_inlines records once SCC peers are
+           done. Off by default (the regen path that would actually
+           re-inline is currently disabled because re-running pass_1 on
+           the snapshot AVs in nodes with rich state). When the regen
+           is fixed, default this on with cs_opt_scc_inline_first. }
+         cs_opt_scc_inline_drain
        );
        toptimizerswitches = set of toptimizerswitch;
 
@@ -465,7 +476,8 @@ interface
          'CONSTPROP',
          'DEADSTORE','FORCENOSTACKFRAME','USELOADMODIFYSTORE',
          'UNUSEDPARA','CONSTS','FORLOOP',
-         'SCCINLINEFIRST'
+         'SCCINLINEFIRST',
+         'SCCINLINEDRAIN'
        );
        WPOptimizerSwitchStr : array [twpoptimizerswitch] of string[14] = (
          'DEVIRTCALLS','OPTVMTS','SYMBOLLIVENESS'

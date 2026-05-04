@@ -251,6 +251,14 @@ interface
         other_scc_unfinished: boolean; { only valid for scc roots }
         scc_tree_crc_wait: tmodule;
 
+        { SCC inline-deferral (cs_opt_scc_inline_first):
+          tcgprocinfos whose pass_2 emitted plain CALLs for cnf_inline_pending
+          callsites (provider impl wasn't compiled yet). Their aktproccode is
+          held back from current_asmdata.asmlists[al_procedures] so the drain
+          in ms_compiling_waitinlines can re-run codegen with inlining now
+          resolved. List does NOT own the items -- the procinfo tree owns them. }
+        pending_inline_procinfos: TFPObjectList;
+
         task: TObject;         { ctask ttask }
 
         localunitsearchpath,           { local searchpaths }
@@ -332,6 +340,13 @@ interface
         function usedunitsloaded(interface_units: boolean; out firstwaiting : tmodule): boolean;
         function nowaitingforunits(out firstwaiting : tmodule) : Boolean;
         function usedunitsfinalcrc(out firstwaiting : tmodule): boolean;
+        { ms_compiling_waitinlines cancontinue: true once every used unit is past
+          the impl-parsing window so its inlininginfo is available for retry. }
+        function scc_peers_impls_done(out firstwaiting : tmodule): boolean;
+        { Cheap probe used by tcgprocinfo.generate_code: true if any used unit is
+          still in pre-impl-finished state, meaning a cnf_inline_pending mark
+          might appear during pass_1 and we should snapshot the AST. }
+        function might_have_pending_inlines : boolean;
         procedure updatemaps;
         function  derefidx_unit(id:longint):longint;
         function  resolve_unit(id:longint):tmodule;
@@ -818,6 +833,10 @@ implementation
         waitingforunit := nil;
         waitingunits.free;
         waitingunits := nil;
+        { pending_inline_procinfos doesn't own its items; the parent procinfos
+          are reachable via procinfo and freed by procinfo.destroy_tree above. }
+        pending_inline_procinfos.free;
+        pending_inline_procinfos := nil;
         used_rtti_attrs.free;
         used_rtti_attrs := nil;
         stringdispose(asmprefix);
@@ -1233,7 +1252,7 @@ implementation
             Internalerror(2026021912);
           end;
         end else begin
-          if state in [ms_compiling_waitimpl,ms_compiling_waitfinish,ms_compiled_waitcrc,ms_compiled,ms_processed] then
+          if state in [ms_compiling_waitimpl,ms_compiling_waitfinish,ms_compiling_waitinlines,ms_compiled_waitcrc,ms_compiled,ms_processed] then
           begin
             writeln('tmodule.checkstate ',modulename^,' ',statestr,' interface_compiled=false');
             Internalerror(2026021911);
@@ -1243,7 +1262,7 @@ implementation
         if crc_final then
         begin
           if state in [ms_registered,ms_compile,ms_compiling_wait,ms_compiling_waitintf,
-            ms_compiling_waitimpl,ms_compiling_waitfinish] then
+            ms_compiling_waitimpl,ms_compiling_waitfinish,ms_compiling_waitinlines] then
           begin
             writeln('tmodule.checkstate ',modulename^,' ',statestr,' crc_final=true');
             Internalerror(2026021910);
@@ -1273,7 +1292,7 @@ implementation
     function tmodule.is_reload_needed(du: tdependent_unit): boolean;
       { du.u is a module using this unit }
       begin
-        Result:=(du.u.state in [ms_compiling_waitfinish,ms_compiled_waitcrc,ms_compiled,ms_processed])
+        Result:=(du.u.state in [ms_compiling_waitfinish,ms_compiling_waitinlines,ms_compiled_waitcrc,ms_compiled,ms_processed])
              or (du.in_interface and du.u.interface_compiled);
         { Note: see also the override in fppu.tppumodule }
       end;
@@ -1418,6 +1437,57 @@ implementation
 
       firstwaiting:=nil;
       Result:=True;
+    end;
+
+    function tmodule.might_have_pending_inlines: boolean;
+    { Speculative trigger for the AST snapshot in tcgprocinfo.generate_code.
+      Returns true when at least one used unit is still pre-impl-parsed --
+      that's the situation in which check_inlining can see the provider's
+      impl as not-yet-compiled and set cnf_inline_pending. False positives
+      are cheap (one tree copy that gets freed); false negatives mean we
+      can't retry even if the state machine would have allowed it. }
+    var
+      uu: tused_unit;
+    begin
+      uu:=tused_unit(used_units.First);
+      while assigned(uu) do
+        begin
+          if not (uu.u.state in [ms_compiling_waitfinish,
+                                 ms_compiling_waitinlines,
+                                 ms_compiled_waitcrc,
+                                 ms_compiled,
+                                 ms_processed,
+                                 ms_moduleerror]) then
+            exit(true);
+          uu:=tused_unit(uu.Next);
+        end;
+      Result:=false;
+    end;
+
+    function tmodule.scc_peers_impls_done(out firstwaiting: tmodule): boolean;
+    { ms_compiling_waitinlines cancontinue: true once every used unit is past
+      the impl-parsing window so its inlininginfo is loaded. We accept any
+      state where parse_body is finished -- waitfinish onward. }
+    var
+      uu: tused_unit;
+    begin
+      firstwaiting:=nil;
+      uu:=tused_unit(used_units.First);
+      while assigned(uu) do
+        begin
+          if not (uu.u.state in [ms_compiling_waitfinish,
+                                 ms_compiling_waitinlines,
+                                 ms_compiled_waitcrc,
+                                 ms_compiled,
+                                 ms_processed,
+                                 ms_moduleerror]) then
+            begin
+              firstwaiting:=uu.u;
+              exit(false);
+            end;
+          uu:=tused_unit(uu.Next);
+        end;
+      Result:=true;
     end;
 
     function tmodule.usesmodule_in_interface(m: tmodule): boolean;

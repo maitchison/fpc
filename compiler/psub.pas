@@ -67,6 +67,25 @@ interface
         temps_finalized : boolean;
         dfabuilder : TDFABuilder;
 
+        { SCC inline-deferral (cs_opt_scc_inline_first):
+          Snapshot of the AST taken AFTER do_firstpass, before
+          OptimizeNodeTree/add_entry_exit_code mutate it. If the procinfo
+          gets deferred (pi_has_pending_inline set), the drain swaps this
+          snapshot back into code, splices in any newly-available inlines
+          via pass1_inline, then re-runs the post-pass1 portion of
+          generate_code. Stays nil for procinfos that don't defer. }
+        ast_snapshot : tnode;
+
+        { Set during the deferral path so read_proc_body skips its
+          freeandnil(current_procinfo) -- the drain owns the procinfo
+          until it has re-run codegen and been recorded. }
+        scc_defer_active : boolean;
+
+        { When true, generate_code skips wrap_proc_body and do_firstpass --
+          used by the SCC inline drain when re-emitting from a post-pass_1
+          snapshot that's already had inline splicing done. }
+        scc_regen_mode : boolean;
+
         destructor  destroy;override;
 
         function calc_stackframe_size : longint;override;
@@ -834,6 +853,11 @@ implementation
          TFPList.FreeAndNilDisposing(tempinfo_flags_map,TypeInfo(ttempinfo_flags_entry));
          code.free;
          code := nil;
+         if assigned(ast_snapshot) then
+           begin
+             ast_snapshot.free;
+             ast_snapshot := nil;
+           end;
          inherited destroy;
        end;
 
@@ -1784,7 +1808,11 @@ implementation
               hpi.generate_code_tree;
             hpi:=tcgprocinfo(hpi.next);
           end;
-        resetprocdef;
+        { SCC inline-deferral: don't free code yet, the drain needs it
+          (or its snapshot) to re-run generate_code with inlining now
+          resolved. }
+        if not scc_defer_active then
+          resetprocdef;
       end;
 
 
@@ -2065,6 +2093,19 @@ implementation
         current_filepos:=entrypos;
         current_structdef:=procdef.struct;
 
+        { SCC inline-deferral (cs_opt_scc_inline_first):
+          Snapshot the parsed AST BEFORE wrap_proc_body / pass_1 mutate it,
+          but only if cnf_inline_pending callsites might appear during
+          pass_1 -- i.e. when this module has unfinished SCC peers (so
+          provider impls aren't loaded yet). Snapshot is freed after the
+          first generate_code if no defer happened, or kept and reused
+          by the drain. We defer the snapshot decision until we have
+          actually seen a cnf_inline_pending mark; for now, take the
+          snapshot speculatively whenever the optimisation is on and
+          there's any unfinished used unit. The cost is one tree copy
+          for procinfos that turn out not to need it. }
+        { (snapshot moved to after do_firstpass below) }
+
         { store start of user code, it must be a block node, it will be used later one to
           check variable lifeness }
         include(code.flags,nf_usercode_entry);
@@ -2074,7 +2115,10 @@ implementation
           trashing values, ...) }
         { init/final code must be wrapped later (after code for main proc body
           has been generated) }
-        if not(current_procinfo.procdef.proctypeoption in [potype_unitinit,potype_unitfinalize]) then
+        { scc_regen_mode: snapshot was taken POST-wrap_proc_body / POST-do_firstpass,
+          so on re-emission we must skip both to avoid double-wrapping. }
+        if not scc_regen_mode and
+           not(current_procinfo.procdef.proctypeoption in [potype_unitinit,potype_unitfinalize]) then
           code:=cnodeutils.wrap_proc_body(procdef,code);
 
         { automatic inlining? }
@@ -2133,9 +2177,36 @@ implementation
         { Print out nodes as they appear after the first pass }
         XMLPrintProc(True);
 {$endif DEBUG_NODE_XML}
-        { firstpass everything }
+        { firstpass everything. In regen mode the caller has stripped
+          tnf_pass1_done from cnf_inline_pending callnodes (and their
+          ancestors so firstpass actually descends), so the re-run only
+          re-pass_1's the inline-pending sites and inlines them via the
+          natural pass1_inline path. Other nodes hit the early-exit. }
         flowcontrol:=[];
         do_firstpass(code);
+
+        { SCC inline-deferral (cs_opt_scc_inline_first):
+          Snapshot AFTER do_firstpass so the tree is fully pass_1'd (every
+          callnode that survived has had check_inlining run on it). For
+          re-emission at SCC drain we'll splice already-loaded inlines in
+          via pass1_inline (same mechanism check_inlining would use), then
+          continue from OptimizeNodeTree onward. We snapshot pre-OptimizeNodeTree
+          and pre-add_entry_exit_code so re-emission can repeat them safely. }
+        if (cs_opt_scc_inline_first in current_settings.optimizerswitches) and
+           (pi_has_pending_inline in flags) and
+           assigned(code) and
+           assigned(current_module) and
+           not (procdef.proctypeoption in [potype_unitinit,potype_unitfinalize]) and
+           not (po_assembler in procdef.procoptions) and
+           not (df_generic in procdef.defoptions) then
+          begin
+            if assigned(ast_snapshot) then
+              begin
+                ast_snapshot.free;
+                ast_snapshot:=nil;
+              end;
+            ast_snapshot:=code.getcopy;
+          end;
 
 {$if defined(i386) or defined(i8086)}
         if node_resources_fpu(code)>0 then
@@ -2480,7 +2551,42 @@ implementation
 
             finish_eh;
 
-            hlcg.record_generated_code_for_procdef(current_procinfo.procdef,aktproccode,aktlocaldata);
+            { SCC inline-deferral: if pass_1 marked any callsites cnf_inline_pending
+              (provider impl wasn't compiled yet), park the procinfo and its
+              aktproccode on the module's pending_inline_procinfos list. The drain
+              in ms_compiling_waitinlines will retry; if any retry succeeds it
+              discards aktproccode and re-runs generate_code on the snapshot.
+              If we don't have a snapshot (rare: defer triggered without snapshot
+              being taken), fall through to the immediate record -- no inline
+              improvement but no regression either. }
+            { TEMP: deferral disabled while AV bisected. Snapshot is still
+              taken (cheap) so future re-enabling has the data. The
+              cs_opt_scc_inline_first switch is explicitly tested with the
+              UNDOCUMENTED -OoSCCINLINEDRAIN suboption -- not the regular
+              SCCINLINEFIRST -- so toggling without rebuild is possible. }
+            if (cs_opt_scc_inline_drain in current_settings.optimizerswitches) and
+               (cs_opt_scc_inline_first in current_settings.optimizerswitches) and
+               (pi_has_pending_inline in flags) and
+               assigned(ast_snapshot) and
+               not (po_assembler in procdef.procoptions) and
+               (procdef.parast.symtablelevel=normal_function_level) then
+              begin
+                if not assigned(current_module.pending_inline_procinfos) then
+                  current_module.pending_inline_procinfos:=TFPObjectList.Create(false);
+                current_module.pending_inline_procinfos.Add(self);
+                scc_defer_active:=true;
+                { drain owns aktproccode/aktlocaldata/ast_snapshot until it
+                  records or re-emits this procinfo. }
+              end
+            else
+              begin
+                hlcg.record_generated_code_for_procdef(current_procinfo.procdef,aktproccode,aktlocaldata);
+                if assigned(ast_snapshot) then
+                  begin
+                    ast_snapshot.free;
+                    ast_snapshot:=nil;
+                  end;
+              end;
 
             { now generate code for any exception filters (they need the tempgen) }
             generate_code_exceptfilters;
@@ -2865,7 +2971,19 @@ implementation
 
         if not isnestedproc then
           { current_procinfo is checked for nil later on }
-          freeandnil(current_procinfo);
+          begin
+            { SCC inline-deferral: if generate_code parked this procinfo
+              on the module's pending list, the drain owns it; do NOT
+              free here. drain_pending_inlines (pmodules) will free it
+              after re-running codegen. We only check the top-level
+              procinfo -- nested children with their own
+              scc_defer_active are kept alive by their parent. }
+            if (current_procinfo is tcgprocinfo) and
+               tcgprocinfo(current_procinfo).scc_defer_active then
+              current_procinfo:=nil
+            else
+              freeandnil(current_procinfo);
+          end;
       end;
 
 

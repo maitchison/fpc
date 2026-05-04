@@ -122,6 +122,7 @@ interface
           ms_compiling_waitintf,  { waiting for used units of interface section }
           ms_compiling_waitimpl,  { waiting for used units of implementation section }
           ms_compiling_waitfinish,{ after impl section parsed, waiting for other impl sections needed by specializations }
+          ms_compiling_waitinlines,{ finish_compile_unit ran but deferred .o, waiting for SCC peers' impls so cnf_inline_pending callsites can retry }
           ms_compiled_waitcrc,   { after computing own CRC, waiting for used units' CRCs }
           ms_compiled,   { compiling complete, ppu written }
           ms_processed,   { task complete }
@@ -139,6 +140,7 @@ interface
           'Compiling_Waiting_interface',
           'Compiling_Waiting_implementation',
           'Compiling_Waiting_finish',
+          'Compiling_Waiting_inlines',
           'Compiled_Waiting_crc',
           'Compiled',
           'Processed',

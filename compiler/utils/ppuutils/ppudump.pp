@@ -1711,7 +1711,9 @@ const
          (mask:pi_no_framepointer_needed;
          str:' set if no frame pointer is needed, the rules when this applies is target specific'),
          (mask:pi_normalized;
-         str:'  has been normalized so no expressions contain block nodes ')
+         str:'  has been normalized so no expressions contain block nodes '),
+         (mask:pi_has_pending_inline;
+         str:'  has at least one cnf_inline_pending callsite (SCC inline-deferral)')
   );
 var
   procinfooptions : tprocinfoflags;
@@ -2533,7 +2535,9 @@ const
          'cs_opt_use_load_modify_store',
          'cs_opt_unused_para',
          'cs_opt_consts',
-         'cs_opt_forloop'
+         'cs_opt_forloop',
+         'cs_opt_scc_inline_first',
+         'cs_opt_scc_inline_drain'
        );
     var
          globalswitch  : tglobalswitch;
