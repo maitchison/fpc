@@ -420,6 +420,23 @@ implementation
                     block_type:=bt_var;
                   end;
 
+                { specialize [set] parameter modifier
+                  (feature/dynamic-params; commit 1: recognition + -vd diagnostic only,
+                   no desugar yet -- the param is treated as a plain integer) }
+                if (current_scanner.token=_ID) and (current_scanner.idtoken=_SPECIALIZE) then
+                  begin
+                    consume(_SPECIALIZE);
+                    consume(_LECKKLAMMER);
+                    if sc.count=1 then
+                      Comment(V_Debug,'specialize-set parameter modifier on "'+tparavarsym(sc[0]).realname+'" (recognised, not yet lowered)')
+                    else
+                      Comment(V_Debug,'specialize-set parameter modifier on '+tostr(sc.count)+' params (recognised, not yet lowered)');
+                    { swallow set elements until matching ']' -- spike only }
+                    while current_scanner.token<>_RECKKLAMMER do
+                      consume(current_scanner.token);
+                    consume(_RECKKLAMMER);
+                  end;
+
                 { open string ? }
                 if is_shortstring(hdef) then
                   begin
