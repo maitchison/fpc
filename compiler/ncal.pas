@@ -4927,6 +4927,21 @@ implementation
         if (po_inline in procdefinition.procoptions) and
            (procdefinition.typ=procdef) then
           begin
+            { Honour the gate that psub.pas/checknodeinlining sets. Without
+              this, an asm proc that failed is_assembler_inlineable (e.g.
+              missing nostackframe) still has its body stored as
+              inlininginfo, the heuristic accepts it, pass1_inline runs,
+              and the splice crashes when it tries to emit a body that
+              contains a prologue/epilogue or other unsplicable construct.
+              pio_inline_not_possible is the authoritative "do not splice
+              this body" signal -- the existing check at the cg_n_no_inline
+              site only suppressed the warning, not the splice itself. }
+            if pio_inline_not_possible in tprocdef(procdefinition).implprocoptions then
+              begin
+                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                  '", marked pio_inline_not_possible (see prior parser_n_not_supported_for_inline note)');
+                exit;
+              end;
             if not tprocdef(procdefinition).has_inlininginfo then
               begin
                 { SCC inline-deferral, slice 1: if the called procdef
