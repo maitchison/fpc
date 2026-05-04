@@ -70,6 +70,12 @@ type
     procedure update_circular_unit_groups;
     procedure search_finished_scc(m: tmodule{$IFDEF DEBUG_PPU_CYCLES}; const Indent: string = ''{$ENDIF});
     function find_unfinished_leaf_scc(m: tmodule): tmodule;
+    { Count how many other unfinished modules in m's SCC import m via
+      their INTERFACE-uses. Used by processqueue to prefer advancing
+      modules whose interface is depended on by SCC peers, so an
+      inline-provider's implementation runs before consumers' impls
+      that may want to inline its bodies. }
+    function scc_intf_inbound_count(m: tmodule): integer;
     function is_uses_waiting(m: tmodule; uu: tused_unit): boolean;
     function check_do_reload_cycle(scc_root: tmodule): boolean;
     function check_crc_mismatches(scc_root: tmodule): boolean;
@@ -571,6 +577,43 @@ begin
   Result:=nil;
 end;
 
+function ttask_handler.scc_intf_inbound_count(m: tmodule): integer;
+{ How many other unfinished loaded modules import m via interface-uses.
+  Higher means m's interface is depended on by other unfinished
+  consumers; advancing m's impl earlier populates inlininginfo for any
+  inline procs declared in m's interface so the consumers' impls can
+  inline them.
+
+  Note: walks loaded_units globally, not just m's SCC. The pathological
+  case is uLeaf imported in interface by uMidA where each ends up as
+  its OWN singleton SCC (no impl-cycle visible at scheduling time);
+  walking only m.scc_next would miss uMidA entirely. }
+var
+  hp: tmodule;
+  uu: tused_unit;
+begin
+  result:=0;
+  hp:=tmodule(loaded_units.first);
+  while assigned(hp) do
+    begin
+      if (hp<>m) and (hp.state<ms_compiled) then
+        begin
+          uu:=tused_unit(hp.used_units.first);
+          while assigned(uu) do
+            begin
+              if uu.in_interface and (uu.u=m) then
+                begin
+                  inc(result);
+                  break;
+                end;
+              uu:=tused_unit(uu.next);
+            end;
+        end;
+      hp:=tmodule(hp.next);
+    end;
+end;
+
+
 function ttask_handler.is_uses_waiting(m: tmodule; uu: tused_unit): boolean;
 var
   um: tmodule;
@@ -1048,10 +1091,18 @@ begin
         {$ENDIF}
         if (m.state<ms_processed) and cancontinue(m,firstwaiting) then
           begin
-            { prefer do_reload, then pas, last ppu }
+            { prefer do_reload, then a unit whose interface is imported by
+              other unfinished SCC members (inline-providers ahead of
+              consumers, so inlininginfo is populated before consumer impls
+              are parsed -- avoids the "body not stored" miss-inline),
+              then pas, last ppu }
             if (best=nil)
                 or m.do_reload
-                or (not best.do_reload and best.fromppu and not m.fromppu)
+                or (not best.do_reload and
+                    (scc_intf_inbound_count(m) > scc_intf_inbound_count(best)))
+                or (not best.do_reload
+                    and (scc_intf_inbound_count(m) = scc_intf_inbound_count(best))
+                    and best.fromppu and not m.fromppu)
             then
               best:=m;
           end;

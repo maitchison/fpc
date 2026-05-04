@@ -534,7 +534,11 @@ Const
         moduleswitches : [cs_extsyntax,cs_implicit_exceptions];
         localswitches : [cs_check_io,cs_typed_const_writable,cs_pointermath,cs_imported_data{$ifdef i8086},cs_force_far_calls{$endif}];
         modeswitches : fpcmodeswitches;
-        optimizerswitches : [];
+        { cs_opt_scc_inline_first defaults ON regardless of -O level:
+          it is a correctness mode for cross-unit inline expansion
+          under the new ctask scheduler, not a code-quality knob. -O-
+          (or explicit -OoNOSCCINLINEFIRST) drops it. }
+        optimizerswitches : [cs_opt_scc_inline_first];
         genwpoptimizerswitches : [];
         dowpoptimizerswitches : [];
 {$ifdef i8086}
