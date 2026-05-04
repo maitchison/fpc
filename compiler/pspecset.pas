@@ -2,20 +2,32 @@
     Specialize-set parameter modifier.
 
     Recognises `param: T specialize [v1, v2, .., a..b]' inside a
-    parameter list. For SS-A this only PARSES + VALIDATES + STORES
-    the modifier on a sidecar; the desugaring (generic-with-const-K
-    + inline dispatch stub) lands in SS-B.
+    parameter list and lowers it to:
 
-    Sidecar lifetime: process-global. The entry list is keyed by
-    procdef pointer and lives until the compiler shuts down. Memory
-    cost is trivial -- one entry per specialize-set-bearing proc.
+      * N specialised wrapper procedures (one per set value), each
+        an exact clone of the user's body with the parameter
+        shadowed by `const k = <v>;' so FPC's normal const-folding
+        kicks in inside.
+      * One dispatch stub with the user's original signature, body
+        is `case k of <v>: f__K_<v>(<args minus k>); ... end' --
+        marked `inline' so constant call sites fold to a direct
+        call to the matching wrapper, runtime call sites become a
+        case-table jump.
 
-    Hook: registers a pp_at_param_modifier pass triggered on
-    `_ID/_SPECIALIZE'. The handler runs INSIDE parse_parameter_dec
-    after single_type has produced the parameter type, so it has
-    access to the procdef being filled, the comma-group of param
-    syms just inserted, and the parsed type (via the context record
-    supplied by the dispatcher).
+    Implementation is a pure preprocessor pass: no AST surgery, no
+    procdef-internals tweaking beyond renaming the user's procsym
+    so the injected dispatch stub can take the user-visible name.
+    Everything else flows through ppreproc.pas's
+    capture/inject/emit primitives.
+
+    Hooks (registered in initialization):
+
+      pp_at_param_modifier  -- parse + validate + sidecar
+      pp_before_proc_body   -- ppreproc_capture_begin (body capture)
+      pp_after_proc_body    -- emit wrappers + stub, inject
+
+    Sidecar lifetime: process-global. Keyed by procdef pointer.
+    Memory cost trivial (one entry per specialize-set-bearing proc).
 }
 unit pspecset;
 
@@ -42,8 +54,16 @@ interface
       tpspecset_proc_entry = class
       public
         procdef: tprocdef;
+        { User's original procsym name, captured BEFORE the
+          rename-to-hidden in pp_at_param_modifier. The dispatch
+          stub takes this name back. }
+        orig_name: shortstring;
         params: array of tpspecset_param_entry;
+        { Body-capture buffer, set in pp_before_proc_body, finalised
+          in pp_after_proc_body. nil if no capture is active. }
+        body_buf: tppreproc_buf;
         constructor create(apd: tprocdef);
+        destructor destroy; override;
       end;
 
     { Lookup the sidecar entry for a procdef, or nil if none was
@@ -64,6 +84,7 @@ interface
 implementation
 
     uses
+      sysutils,
       globtype,
       globals,
       tokens,
@@ -74,6 +95,7 @@ implementation
       pexpr,
       symbase,
       symsym,
+      symconst,
       defutil,
       constexp,
       node,
@@ -88,6 +110,17 @@ implementation
       begin
         inherited create;
         procdef := apd;
+        body_buf := nil;
+      end;
+
+    destructor tpspecset_proc_entry.destroy;
+      begin
+        if assigned(body_buf) then
+          begin
+            body_buf.free;
+            body_buf := nil;
+          end;
+        inherited destroy;
       end;
 
     function pspecset_find(pd: tprocdef): tpspecset_proc_entry;
@@ -131,9 +164,10 @@ implementation
           result := result * length(entry.params[i].values);
       end;
 
-    { Helper: bail out of the parser cleanly after a specialize-set
-      error. Skips to (and consumes) the closing `]'. Caller already
-      issued the error message. }
+    { ============================================================
+       Set-body parser (used by pp_at_param_modifier handler)
+      ============================================================ }
+
     procedure pspecset_skip_set_body;
       var
         depth: longint;
@@ -159,12 +193,6 @@ implementation
           consume(_RECKKLAMMER);
       end;
 
-    { Parse the set body `[v1, v2, .., a..b, ...]'. The opening `['
-      MUST already have been consumed by the caller. Appends parsed
-      values (ranges fully expanded) into `values', updating nvalues.
-      Returns true on success and consumes the trailing `]'; on error
-      issues a Message and returns false (with the parser advanced
-      past the closing `]' so subsequent declarations parse cleanly). }
     function parse_set_body(var values: array of int64;
                             var nvalues: longint;
                             const max_values: longint): boolean;
@@ -185,7 +213,6 @@ implementation
           end;
 
         repeat
-          { lower bound -- or sole value if no `..' follows }
           lower_node := comp_expr([]);
           if lower_node.nodetype <> ordconstn then
             begin
@@ -234,8 +261,6 @@ implementation
                   pspecset_skip_set_body;
                   exit;
                 end;
-              { duplicates within the set are pointless but not fatal;
-                drop them silently to keep the cartesian count honest }
               i := 0;
               while i < nvalues do
                 begin
@@ -269,24 +294,41 @@ implementation
         result := true;
       end;
 
-    { The pp_at_param_modifier handler. Triggered by `specialize'
-      after a parameter type. Returns true if it consumed the
-      construct; false leaves scanner state unchanged.
+    { ============================================================
+       pp_at_param_modifier handler (SS-A)
+      ============================================================ }
 
-      Validates:
-        * ctx is supplied (would be a framework bug otherwise)
-        * procdef is a real tprocdef (not a procvar)
-        * exactly one parameter sym in the comma group
-        * parameter type is ordinal
-        * set body parses cleanly
-        * total cardinality across all this proc's specialize-set
-          params <= PSPECSET_MAX_VALUES
+    { Rename pd's procsym to a unique hidden name so:
+        * The user-visible original name is freed up for the
+          to-be-injected dispatch stub.
+        * proc_set_mangledname (called LATER, in psub.pas:3061 after
+          parse_proc_head finishes) sees the renamed procsym and
+          assigns a unique mangled label -- no collision with the
+          dispatch stub's eventual symbol.
 
-      On success stores a tpspecset_param_entry on the per-procdef
-      sidecar and emits a -vd diagnostic. SS-A does NOT emit any
-      desugar -- the caller-side parser keeps treating the parameter
-      as a plain `T'. The desugar lands in SS-B via the
-      pp_after_proc_body hook reading the sidecar. }
+      MUST be called from SS-A's pp_at_param_modifier handler, BEFORE
+      mangling happens. Calling later trips internalerror 200411171
+      in tprocdef.setmangledname (mangled name is frozen once set). }
+    procedure rename_user_procsym_unique(pd: tprocdef);
+      var
+        psym: tprocsym;
+        old_name: shortstring;
+        hidden_name: shortstring;
+        n: longint;
+      begin
+        if not assigned(pd.procsym) then
+          exit;
+        psym := tprocsym(pd.procsym);
+        old_name := psym.realname;
+        n := 1;
+        repeat
+          hidden_name := '$specset_orig_' + old_name + '_' + tostr(n);
+          inc(n);
+        until psym.owner.find(hidden_name) = nil;
+        psym.ChangeOwnerAndName(psym.owner, upper(hidden_name));
+        psym.realname := hidden_name;
+      end;
+
     function pspecset_handle_param_modifier(ctx: pointer): boolean;
       var
         param_ctx: pppreproc_param_modifier_ctx;
@@ -302,8 +344,6 @@ implementation
       begin
         result := false;
 
-        { Confirm the dispatch trigger -- defensive; the framework
-          already filtered, but we want to abort cleanly if not. }
         if not ((current_scanner.token = _ID) and
                 (current_scanner.idtoken = _SPECIALIZE)) then
           exit;
@@ -312,8 +352,6 @@ implementation
           exit;
         param_ctx := pppreproc_param_modifier_ctx(ctx);
 
-        { specialize-set on a procvar parameter list is meaningless
-          (procvars don't have generic instantiation). Reject. }
         if not (param_ctx^.procdef is tprocdef) then
           begin
             Comment(V_Error,
@@ -333,11 +371,6 @@ implementation
         sc := TFPObjectList(param_ctx^.param_syms);
         hdef := tdef(param_ctx^.param_type);
 
-        { Restrict v1 to one parameter per modifier -- comma-group
-          like `(a, b: integer specialize [...])' would mean both
-          `a' and `b' are independently specialise-set, which blows
-          up the cartesian fast and the user can write them one at
-          a time anyway. }
         if (sc = nil) or (sc.count <> 1) then
           begin
             Comment(V_Error,
@@ -379,9 +412,6 @@ implementation
           end;
         consume(_LECKKLAMMER);
 
-        { Look up the existing sidecar to know the running cartesian
-          count -- the per-modifier cap interacts with prior modifiers
-          on the same proc. }
         entry := pspecset_find(pd);
         if entry = nil then
           existing_count := 1
@@ -392,7 +422,6 @@ implementation
         nvalues := 0;
         if not parse_set_body(values, nvalues, PSPECSET_MAX_VALUES) then
           begin
-            { parse_set_body already issued the Message and recovered }
             result := true;
             exit;
           end;
@@ -408,8 +437,17 @@ implementation
             exit;
           end;
 
-        { Commit to the sidecar. }
         entry := pspecset_get_or_create(pd);
+        if entry.orig_name = '' then
+          begin
+            { First specialize-set modifier on this proc. Save the
+              user's name and rename the procsym so proc_set_mangledname
+              (which runs LATER, after parse_proc_head finishes) gets
+              the renamed name and assigns a unique mangled label. }
+            if assigned(pd.procsym) then
+              entry.orig_name := pd.procsym.realname;
+            rename_user_procsym_unique(pd);
+          end;
         pe_idx := length(entry.params);
         setlength(entry.params, pe_idx + 1);
         entry.params[pe_idx].param_name := vs.realname;
@@ -426,6 +464,372 @@ implementation
         result := true;
       end;
 
+    { ============================================================
+       pp_before_proc_body handler -- start body capture
+      ============================================================ }
+
+    function pspecset_handle_before_body(ctx: pointer): boolean;
+      var
+        body_ctx: pppreproc_proc_body_ctx;
+        pd: tprocdef;
+        entry: tpspecset_proc_entry;
+        origin: tppreproc_origin;
+      begin
+        result := false;
+        if not assigned(ctx) then
+          exit;
+        body_ctx := pppreproc_proc_body_ctx(ctx);
+        if not (body_ctx^.procdef is tprocdef) then
+          exit;
+        pd := tprocdef(body_ctx^.procdef);
+        entry := pspecset_find(pd);
+        if entry = nil then
+          exit;
+        if length(entry.params) = 0 then
+          exit;
+        if assigned(entry.body_buf) then
+          { defensive: capture already in progress for this procdef }
+          exit;
+        if current_scanner.is_recording_tokens then
+          begin
+            { conflict with FPC's generic-body capture; not supported in v1 }
+            Comment(V_Error,
+              'specialize-set: cannot combine with a generic procedure');
+            exit;
+          end;
+
+        origin.triggered_at := current_filepos;
+        origin.feature := 'specialize-set-body';
+        entry.body_buf := ppreproc_capture_begin(origin);
+        Comment(V_Debug, 'specialize-set: body capture begun');
+        result := true;
+      end;
+
+    { ============================================================
+       Helpers for emitting wrappers + dispatch stub
+      ============================================================ }
+
+    type
+      tspecset_emit_param = record
+        name: shortstring;
+        typename: shortstring;
+        spec: tvarspez;
+        is_specparam: boolean;
+      end;
+
+    { Append the captured body buffer into `dst' verbatim. The source
+      buffer's read pointer is preserved. }
+    procedure copy_buf_into(dst, src: tppreproc_buf);
+      var
+        savepos: longword;
+        b: byte;
+      begin
+        if not assigned(src) then
+          exit;
+        savepos := src.data.pos;
+        src.data.seek(0);
+        while src.data.pos < src.data.size do
+          begin
+            src.data.read(b, 1);
+            dst.data.write(b, 1);
+          end;
+        src.data.seek(savepos);
+      end;
+
+    { Walk pd.parast.SymList and collect ALL visible (non-hidden)
+      parameters in source order. The one named kname is flagged
+      via is_specparam. typename is taken from the parameter's vardef.typesym
+      -- types without a typesym (anonymous types) cause emission to
+      be aborted with an error (returns false). }
+    function collect_visible_params(pd: tprocdef;
+                                    const kname: shortstring;
+                                    out emit_paras: array of tspecset_emit_param;
+                                    out count: longint): boolean;
+      var
+        i: longint;
+        sym: tsym;
+        ps: tparavarsym;
+      begin
+        result := true;
+        count := 0;
+        for i := 0 to pd.parast.SymList.count - 1 do
+          begin
+            sym := tsym(pd.parast.SymList[i]);
+            if sym.typ <> paravarsym then
+              continue;
+            ps := tparavarsym(sym);
+            if vo_is_hidden_para in ps.varoptions then
+              continue;
+            if not assigned(ps.vardef.typesym) then
+              begin
+                Comment(V_Error,
+                  'specialize-set: parameter "' + ps.realname +
+                  '" has anonymous type; specialize-set requires named ' +
+                  'parameter types');
+                result := false;
+                exit;
+              end;
+            if count > high(emit_paras) then
+              begin
+                Comment(V_Error,
+                  'specialize-set: too many visible parameters');
+                result := false;
+                exit;
+              end;
+            emit_paras[count].name := ps.realname;
+            emit_paras[count].typename := ps.vardef.typesym.realname;
+            emit_paras[count].spec := ps.varspez;
+            emit_paras[count].is_specparam := SameText(ps.realname, kname);
+            inc(count);
+          end;
+      end;
+
+    procedure emit_param_spec(buf: tppreproc_buf; spec: tvarspez);
+      begin
+        case spec of
+          vs_var:      ppreproc_emit_keyword(buf, _VAR);
+          vs_const:    ppreproc_emit_keyword(buf, _CONST);
+          vs_out:      ppreproc_emit_keyword(buf, _OUT);
+          vs_constref: ppreproc_emit_ident(buf, 'constref');
+          else
+            ;
+        end;
+      end;
+
+    { Emit:
+        procedure <wrapper_name>(<sig minus k>); inline;
+        const <kname> = <v>;
+        <body tokens>
+      The body is a cloned copy of body_buf. }
+    procedure emit_wrapper(buf: tppreproc_buf;
+                           const wrapper_name: shortstring;
+                           v: int64;
+                           const kname: shortstring;
+                           const emit_paras: array of tspecset_emit_param;
+                           paras_count: longint;
+                           body_buf: tppreproc_buf);
+      var
+        i: longint;
+        first_para: boolean;
+      begin
+        ppreproc_emit_keyword(buf, _PROCEDURE);
+        ppreproc_emit_ident(buf, wrapper_name);
+
+        ppreproc_emit_punct(buf, _LKLAMMER);
+        first_para := true;
+        for i := 0 to paras_count - 1 do
+          begin
+            if emit_paras[i].is_specparam then
+              continue;
+            if not first_para then
+              ppreproc_emit_punct(buf, _SEMICOLON);
+            emit_param_spec(buf, emit_paras[i].spec);
+            ppreproc_emit_ident(buf, emit_paras[i].name);
+            ppreproc_emit_punct(buf, _COLON);
+            ppreproc_emit_ident(buf, emit_paras[i].typename);
+            first_para := false;
+          end;
+        ppreproc_emit_punct(buf, _RKLAMMER);
+        ppreproc_emit_punct(buf, _SEMICOLON);
+
+        { inline directive }
+        ppreproc_emit_ident_as(buf, 'inline', _INLINE);
+        ppreproc_emit_punct(buf, _SEMICOLON);
+
+        { const k = <v>; }
+        ppreproc_emit_keyword(buf, _CONST);
+        ppreproc_emit_ident(buf, kname);
+        ppreproc_emit_punct(buf, _EQ);
+        ppreproc_emit_intliteral(buf, v);
+        ppreproc_emit_punct(buf, _SEMICOLON);
+
+        { Body tokens: local decls + begin..end. }
+        copy_buf_into(buf, body_buf);
+
+        { Trailing `;' after the body's `end'. }
+        ppreproc_emit_punct(buf, _SEMICOLON);
+      end;
+
+    { Emit:
+        procedure <fname>(<full sig including k in source order>); inline;
+        begin
+          case <kname> of
+            <v1>: <fname>__K_<v1>(<args minus k in source order>);
+            ...
+          end;
+        end;
+    }
+    procedure emit_dispatch_stub(buf: tppreproc_buf;
+                                 const fname: shortstring;
+                                 const kname: shortstring;
+                                 const emit_paras: array of tspecset_emit_param;
+                                 paras_count: longint;
+                                 const values: array of int64);
+      var
+        i, j: longint;
+        first_arg: boolean;
+      begin
+        ppreproc_emit_keyword(buf, _PROCEDURE);
+        ppreproc_emit_ident(buf, fname);
+
+        { Full signature -- preserves user's source order, K and all. }
+        ppreproc_emit_punct(buf, _LKLAMMER);
+        for i := 0 to paras_count - 1 do
+          begin
+            if i > 0 then
+              ppreproc_emit_punct(buf, _SEMICOLON);
+            emit_param_spec(buf, emit_paras[i].spec);
+            ppreproc_emit_ident(buf, emit_paras[i].name);
+            ppreproc_emit_punct(buf, _COLON);
+            ppreproc_emit_ident(buf, emit_paras[i].typename);
+          end;
+        ppreproc_emit_punct(buf, _RKLAMMER);
+        ppreproc_emit_punct(buf, _SEMICOLON);
+
+        { inline directive }
+        ppreproc_emit_ident_as(buf, 'inline', _INLINE);
+        ppreproc_emit_punct(buf, _SEMICOLON);
+
+        { begin case <kname> of ... end; end; }
+        ppreproc_emit_keyword(buf, _BEGIN);
+        ppreproc_emit_keyword(buf, _CASE);
+        ppreproc_emit_ident(buf, kname);
+        ppreproc_emit_keyword(buf, _OF);
+
+        for i := 0 to high(values) do
+          begin
+            ppreproc_emit_intliteral(buf, values[i]);
+            ppreproc_emit_punct(buf, _COLON);
+            ppreproc_emit_ident(buf, fname + '__K_' + tostr(values[i]));
+            ppreproc_emit_punct(buf, _LKLAMMER);
+            first_arg := true;
+            for j := 0 to paras_count - 1 do
+              begin
+                if emit_paras[j].is_specparam then
+                  continue;
+                if not first_arg then
+                  ppreproc_emit_punct(buf, _COMMA);
+                ppreproc_emit_ident(buf, emit_paras[j].name);
+                first_arg := false;
+              end;
+            ppreproc_emit_punct(buf, _RKLAMMER);
+            ppreproc_emit_punct(buf, _SEMICOLON);
+          end;
+
+        ppreproc_emit_keyword(buf, _END);  { case-end }
+        ppreproc_emit_punct(buf, _SEMICOLON);
+        ppreproc_emit_keyword(buf, _END);  { proc-end }
+        ppreproc_emit_punct(buf, _SEMICOLON);
+      end;
+
+    { ============================================================
+       pp_after_proc_body handler -- emit + inject
+      ============================================================ }
+
+    function pspecset_handle_after_body(ctx: pointer): boolean;
+      var
+        body_ctx: pppreproc_proc_body_ctx;
+        pd: tprocdef;
+        entry: tpspecset_proc_entry;
+        param_entry: tpspecset_param_entry;
+        emit_paras: array[0..63] of tspecset_emit_param;
+        paras_count: longint;
+        inject_buf: tppreproc_buf;
+        inject_origin: tppreproc_origin;
+        i: longint;
+        wrapper_name: shortstring;
+        kname: shortstring;
+        orig_name: shortstring;
+      begin
+        { Initialise out-parameters defensively in case a helper bails. }
+        paras_count := 0;
+        fillchar(emit_paras, sizeof(emit_paras), 0);
+        result := false;
+        if not assigned(ctx) then
+          exit;
+        body_ctx := pppreproc_proc_body_ctx(ctx);
+        if not (body_ctx^.procdef is tprocdef) then
+          exit;
+        pd := tprocdef(body_ctx^.procdef);
+        entry := pspecset_find(pd);
+        if entry = nil then
+          exit;
+        if not assigned(entry.body_buf) then
+          exit;
+
+        { Finalise body capture. }
+        ppreproc_capture_end(entry.body_buf);
+        Comment(V_Debug, 'specialize-set: body capture ended, ' +
+          tostr(entry.body_buf.data.size) + ' bytes');
+
+        { v1: only one specialize-set parameter supported. }
+        if length(entry.params) <> 1 then
+          begin
+            Comment(V_Error,
+              'specialize-set: multi-parameter desugar not yet supported');
+            exit;
+          end;
+        param_entry := entry.params[0];
+        kname := param_entry.param_name;
+        orig_name := entry.orig_name;
+
+        { Collect ALL visible params (in source order) from the procdef.
+          The specialize-bearing one is flagged via is_specparam. }
+        if not collect_visible_params(pd, kname, emit_paras, paras_count) then
+          exit;
+
+        { Build the injection buffer. The leading `;' satisfies
+          read_proc_body's consume(_SEMICOLON) that fires right after
+          we return -- see the matching `if current_scanner.token =
+          _SEMICOLON then consume' below for the rest of the dance. }
+        inject_origin.triggered_at := current_filepos;
+        inject_origin.feature := 'specialize-set-emit';
+        inject_buf := tppreproc_buf.create(inject_origin);
+        ppreproc_emit_punct(inject_buf, _SEMICOLON);
+
+        for i := 0 to high(param_entry.values) do
+          begin
+            wrapper_name := orig_name + '__K_' +
+                            tostr(param_entry.values[i]);
+            emit_wrapper(inject_buf, wrapper_name,
+                         param_entry.values[i], kname,
+                         emit_paras, paras_count, entry.body_buf);
+          end;
+
+        { The user's procsym was already renamed in SS-A; orig_name
+          is now free for the dispatch stub to claim when its decl
+          parses out of the inject buffer. }
+        emit_dispatch_stub(inject_buf, orig_name, kname,
+                           emit_paras, paras_count, param_entry.values);
+
+        { read_proc_body (psub.pas:2912) will call consume(_SEMICOLON)
+          shortly after we return -- it expects the `;' that follows
+          the body's `end' in user source. Eat the user's `;' now,
+          and prepend our own `;' to the inject buffer so the upcoming
+          consume sees one. After the buffer drains, scanner control
+          returns to user source one token past the original `;' --
+          ready for the next user-level decl (e.g. `procedure g'). }
+        if current_scanner.token = _SEMICOLON then
+          consume(_SEMICOLON);
+
+        Comment(V_Debug,
+          'specialize-set: inject buffer ' + tostr(inject_buf.data.size) +
+          ' bytes (' + tostr(length(param_entry.values)) +
+          ' wrappers + 1 stub)');
+
+        ppreproc_inject(inject_buf);
+
+        { body_buf is no longer needed; release. The injection buffer
+          stays alive until the scanner replay is done -- the scanner
+          owns the underlying tdynamicarray during replay; we leak the
+          tppreproc_buf wrapper. v1: trivial leak per specset proc;
+          revisit if it ever matters. }
+        entry.body_buf.free;
+        entry.body_buf := nil;
+
+        result := true;
+      end;
+
 initialization
 
     ppreproc_register(
@@ -435,6 +839,24 @@ initialization
         _ID,
         _SPECIALIZE,
         @pspecset_handle_param_modifier
+      )
+    );
+    ppreproc_register(
+      ppreproc_make_pass(
+        'specialize-set-before-body',
+        pp_before_proc_body,
+        NOTOKEN,
+        NOTOKEN,
+        @pspecset_handle_before_body
+      )
+    );
+    ppreproc_register(
+      ppreproc_make_pass(
+        'specialize-set-after-body',
+        pp_after_proc_body,
+        NOTOKEN,
+        NOTOKEN,
+        @pspecset_handle_after_body
       )
     );
 

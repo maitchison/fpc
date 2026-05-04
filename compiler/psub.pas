@@ -2683,6 +2683,13 @@ implementation
              current_scanner.startrecordtokens(procdef.generictokenbuf);
            end;
 
+         { ppreproc dispatch point: pp_before_proc_body.
+           Scanner is at the body's `begin'. Sugar features that want
+           to capture or rewrite the body hook here. No-op when no
+           passes are registered. }
+         pp_body_ctx.procdef := procdef;
+         ppreproc_try_dispatch(pp_before_proc_body, @pp_body_ctx);
+
          { parse the code ... }
          code:=block(current_module.islibrary);
 

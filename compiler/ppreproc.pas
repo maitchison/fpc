@@ -83,6 +83,16 @@ interface
           follows the type (modifier keyword, `;', `)', `=' for default).
           Used by feature/dynamic-params for `T specialize [set]'. }
         pp_at_param_modifier,
+        { Just before block() parses a procedure/function body. The
+          procdef's parameter list is finalised (parast filled in,
+          calling-convention applied). Scanner is at whatever begins
+          the body region: either the first local-decl keyword
+          (`var', `const', `type', `procedure', ...) or `begin' if
+          there are no local decls. Hooking here is the right spot to
+          start a body-capture buffer that should include local decls
+          + statement block.
+          Uses tppreproc_proc_body_ctx (same record as pp_after_proc_body). }
+        pp_before_proc_body,
         { Just after a procedure/function body has been parsed and the
           procdef is fully populated (procdef.is_implemented = true).
           Scanner state: at whatever follows the proc's terminating
