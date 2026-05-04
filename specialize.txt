@@ -564,8 +564,20 @@ Existing code:
 
 Worktree:
   C:\claudefpc\trunk-features\dynamic-params on branch
-  feature/dynamic-params; commits 93b8bb1bb2c (parser spike) +
-  cf8cb33eaab (ppreproc framework) atop `working'.
+  feature/dynamic-params, atop `working'.
+
+Commits (oldest first):
+  93b8bb1bb2c  specialize-set: parser recognition spike (no desugar)
+  cf8cb33eaab  ppreproc: token-level preprocessor framework
+  a86e4539dfd  specialize.txt: feature design + ppreproc.pas notes
+                                 (this document)
+
+To branch the next feature off this state:
+  git -C C:/claudefpc/trunk worktree add -b feature/<name> \
+      C:/claudefpc/trunk-features/<name> feature/dynamic-params
+
+The branch stays unmerged from `working' until the dependent
+feature is built and verified -- both stacks merge together.
 
 Smoke test:
   share\specfn1.pas + share\dospec1.bat
