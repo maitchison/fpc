@@ -579,7 +579,10 @@ Commits (oldest first):
                                   desugar yet -- runtime semantics are
                                   identical to a plain `T' parameter)
 
-Status: SS-A complete and tested. SS-B/C/D still pending.
+Status (2026-05-05): SS-A, SS-B, SS-C, SS-D all complete and tested.
+Pure-preprocessor token rewriter; no AST surgery, no FPC generic
+machinery. Only one targeted symbol-table operation (rename procsym
+in SS-A handler so dispatch stub can claim the user-visible name).
 
 What works on this branch right now:
   * `param: T specialize [v1, v2, a..b]' parses and stores a sidecar

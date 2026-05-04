@@ -371,6 +371,53 @@ implementation
         sc := TFPObjectList(param_ctx^.param_syms);
         hdef := tdef(param_ctx^.param_type);
 
+        { Reject methods (class/record/object) entirely in v1. The
+          spec specifically calls out virtual -- which would require
+          all N wrappers + the dispatch stub to live in the same
+          vtable slot. We can't even check po_virtualmethod here
+          because the `virtual' directive is parsed AFTER the
+          parameter list, so at SS-A time procoptions is incomplete.
+          Plus the desugar emits free top-level decls, which won't
+          attach to the class's symtable correctly. Reject all
+          struct-bound procs up-front; revisit non-virtual methods
+          in v2 if needed. }
+        if assigned(pd.struct) then
+          begin
+            Comment(V_Error,
+              'specialize-set: not yet supported on methods (v1)');
+            consume(_SPECIALIZE);
+            if current_scanner.token = _LECKKLAMMER then
+              begin
+                consume(_LECKKLAMMER);
+                pspecset_skip_set_body;
+              end;
+            result := true;
+            exit;
+          end;
+
+        { Reject overload conflicts. At SS-A time pd is not yet in
+          procsym.ProcdefList (proc_add_definition runs later); any
+          entries already there are PRIOR overloads with the same
+          name. Mixing specialize-set with non-specialize-set
+          overloads triggers ambiguous resolution at call sites, so
+          reject up-front. }
+        if assigned(pd.procsym) and
+            (tprocsym(pd.procsym).ProcdefList.count > 0) then
+          begin
+            Comment(V_Error,
+              'specialize-set: cannot overload "' +
+              pd.procsym.realname +
+              '" with a non-specialize-set version in the same scope');
+            consume(_SPECIALIZE);
+            if current_scanner.token = _LECKKLAMMER then
+              begin
+                consume(_LECKKLAMMER);
+                pspecset_skip_set_body;
+              end;
+            result := true;
+            exit;
+          end;
+
         if (sc = nil) or (sc.count <> 1) then
           begin
             Comment(V_Error,
