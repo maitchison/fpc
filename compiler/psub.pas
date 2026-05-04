@@ -2610,6 +2610,7 @@ implementation
          parentfpinitblock: tnode;
          old_parse_generic: boolean;
          recordtokens : boolean;
+         pp_body_ctx: tppreproc_proc_body_ctx;
       begin
          old_current_procinfo:=current_procinfo;
          old_block_type:=block_type;
@@ -2715,7 +2716,8 @@ implementation
            that need to generate companion declarations (e.g.
            specialize-set's dispatch stub) hook here.
            No-op when no passes are registered for this point. }
-         ppreproc_try_dispatch(pp_after_proc_body);
+         pp_body_ctx.procdef := procdef;
+         ppreproc_try_dispatch(pp_after_proc_body, @pp_body_ctx);
 
          if assigned(code) then
            begin

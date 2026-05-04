@@ -121,12 +121,36 @@ interface
         destructor destroy; override;
       end;
 
+      { Context payload for pp_at_param_modifier. The procdef is the
+        proc whose parameter list is being parsed; param_syms is a
+        TFPObjectList of tparavarsym just inserted for the current
+        comma-group (e.g. for `a, b: integer specialize [...]', list
+        is [a-sym, b-sym]); param_type is the tdef returned from
+        single_type. All fields are tobject because ppreproc.pas does
+        not depend on symdef/symsym -- consumers cast on use. }
+      tppreproc_param_modifier_ctx = record
+        procdef: tobject;
+        param_syms: tobject;
+        param_type: tobject;
+      end;
+      pppreproc_param_modifier_ctx = ^tppreproc_param_modifier_ctx;
+
+      { Context payload for pp_after_proc_body. procdef is fully
+        populated; if it was generic, procdef.generictokenbuf holds
+        the captured body. }
+      tppreproc_proc_body_ctx = record
+        procdef: tobject;
+      end;
+      pppreproc_proc_body_ctx = ^tppreproc_proc_body_ctx;
+
       { Handler signature for a registered pass. The handler is invoked
         when the parser hits the grammar point and the trigger token
-        matches the next scanner token. Returns TRUE if the construct
-        was consumed (parser should not try further passes); FALSE to
-        leave scanner state unchanged. }
-      tppreproc_handler = function: boolean;
+        matches the next scanner token. `ctx` carries point-specific
+        parser state -- see the tppreproc_*_ctx records above. May be
+        nil at points that don't supply context. Returns TRUE if the
+        construct was consumed (parser should not try further passes);
+        FALSE to leave scanner state unchanged. }
+      tppreproc_handler = function(ctx: pointer): boolean;
 
       tppreproc_pass = record
         { stable feature tag; appears in -vd diagnostics }
@@ -151,7 +175,7 @@ interface
     { ---- registration ---- }
 
     procedure ppreproc_register(const pass: tppreproc_pass);
-    function  ppreproc_try_dispatch(point: tppreproc_point): boolean;
+    function  ppreproc_try_dispatch(point: tppreproc_point; ctx: pointer = nil): boolean;
 
     { Convenience: build a tppreproc_pass record without a verbose call
       site. }
@@ -296,7 +320,7 @@ implementation
       the current scanner token matches the pass's trigger; if so,
       invokes the handler. Returns TRUE as soon as a handler reports
       that it consumed the construct. }
-    function ppreproc_try_dispatch(point: tppreproc_point): boolean;
+    function ppreproc_try_dispatch(point: tppreproc_point; ctx: pointer = nil): boolean;
       var
         i: longint;
         p: tppreproc_pass;
@@ -326,7 +350,7 @@ implementation
               consume() path, OR for capturing+injecting via the
               framework helpers. }
             if assigned(p.handler) then
-              if p.handler() then
+              if p.handler(ctx) then
                 begin
                   result := true;
                   exit;
@@ -478,113 +502,5 @@ implementation
         current_scanner.startreplaytokens(b.data, false);
       end;
 
-
-    { -------------- smoke pass --------------
-
-      Temporary self-test. Registered unconditionally; fires when the
-      parser hits `specialize' after a parameter type (the same trigger
-      the dynamic-params feature will use).
-
-      Behaviour: consume `specialize [ ... ]', capture the bracket
-      contents into a buffer, discard the buffer, return true. Net
-      effect on user code: identical to commit 1's hand-rolled spike
-      (the modifier is consumed and the parameter is treated as
-      plain T).
-
-      Purpose: exercise the framework's capture API end-to-end so we
-      can verify (build green; smoke test compiles and runs; -vd shows
-      the diagnostic) before the dynamic-params feature pass replaces
-      this with the real desugar. Once that lands, this smoke pass is
-      removed from `initialization' below. }
-
-    function ppreproc_smoke_specialize_set: boolean;
-      var
-        buf: tppreproc_buf;
-        origin: tppreproc_origin;
-        depth: longint;
-      begin
-        result := false;
-        { Pre-check the trigger ourselves -- the dispatcher already
-          filtered, but defensive: confirm we're really sitting on
-          the `specialize' keyword. }
-        if not ((current_scanner.token=_ID) and
-                (current_scanner.idtoken=_SPECIALIZE)) then
-          exit;
-
-        { Set up an origin record for the buffer. The user-source
-          position is "wherever specialize is". }
-        origin.triggered_at := current_filepos;
-        origin.feature := 'ppreproc-smoke';
-
-        { Consume the `specialize' keyword and the opening bracket
-          BEFORE starting capture -- we don't need them in the buffer
-          for the smoke test. }
-        consume(_SPECIALIZE);
-        consume(_LECKKLAMMER);
-
-        { Begin capture. Everything the parser/scanner advances over
-          from now until capture_end lands in buf.data. }
-        buf := ppreproc_capture_begin(origin);
-
-        { Walk to the matching `]'. Track bracket depth so nested set
-          constructors like `[1, [2..4], 8]' (if we ever support them)
-          don't terminate early. }
-        depth := 1;
-        while depth > 0 do
-          begin
-            case current_scanner.token of
-              _LECKKLAMMER:
-                inc(depth);
-              _RECKKLAMMER:
-                begin
-                  dec(depth);
-                  if depth = 0 then
-                    break;
-                end;
-              _EOF:
-                begin
-                  { Unterminated set -- bail. The capture_end below
-                    is still required. }
-                  break;
-                end;
-              else
-                ; { other tokens are set elements; just advance }
-            end;
-            consume(current_scanner.token);
-          end;
-
-        { Stop capture BEFORE consuming the closing bracket so the
-          buffer ends with the last set element, not with `]'. }
-        ppreproc_capture_end(buf);
-
-        if current_scanner.token = _RECKKLAMMER then
-          consume(_RECKKLAMMER);
-
-        { Diagnostic so we can see the path fired. -vd visibility. }
-        Comment(V_Debug, 'ppreproc smoke: specialize-set captured ' +
-                         tostr(buf.data.size) + ' bytes from ' +
-                         origin.feature);
-
-        { Discard the buffer -- this is the no-op smoke. The real
-          dynamic-params pass will transform + inject. }
-        buf.free;
-
-        result := true;
-      end;
-
-
-initialization
-
-    { Register the smoke pass at unit init time. Removed once the
-      dynamic-params feature provides a real handler. }
-    ppreproc_register(
-      ppreproc_make_pass(
-        'ppreproc-smoke',           { name }
-        pp_at_param_modifier,       { grammar point }
-        _ID,                        { trigger token kind }
-        _SPECIALIZE,                { trigger idtoken (keyword) }
-        @ppreproc_smoke_specialize_set
-      )
-    );
 
 end.
