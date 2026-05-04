@@ -7,7 +7,7 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
-== IDE 1.0.24 / Compiler 3.3.10 ==
+== IDE 1.0.23a / Compiler 3.3.9a ==
 
 Compiler
   * `specialize-set' parameter modifier (feature/dynamic-params).
@@ -72,6 +72,55 @@ Compiler
 == IDE 1.0.23 / Compiler 3.3.9 ==
 
 Compiler
+  * Intel asm: %if / %elseif / %else / %endif compile-time conditionals
+    in the Intel asm reader (rax86int.pas). Conditional expressions are
+    folded by the existing BuildConstExpression machinery (asm-grammar
+    const-expression parser, returns aint; non-zero == true). Accepts
+    integer constants, in-scope const declarations, +/- /* / mod / shl /
+    shr / not / and / or / xor / parenthesisation. Maintains a per-
+    Assemble pctifstack with (taken, in_branch, seen_else); skip-mode
+    swallows tokens up to AS_SEPARATOR so labels in dead branches are
+    NOT declared. Nested %if inside a skip block forces taken:=true so
+    inner %elseif and %else cannot resurrect a branch. Unbalanced %if
+    at end-of-block raises asmr_e_syntax_error. AT&T reader is
+    unchanged (Intel-only feature).
+
+  * Inline-heuristic defaults updated: -OoINLINESITEBUDGET defaults to
+    1000 (was 0 = legacy depth formula). The flat per-site model is now
+    the default behaviour out of the box. Legacy depth formula gave
+    10000 / 1000 / 251 / 100 / 52 nodes at depths 0..4; the depth
+    penalty rejected mid-sized helpers anywhere four-deep in a call
+    tree. 1000 matches the legacy depth-1 ceiling so any candidate
+    legacy accepted at depth >=1 still inlines; only the unhinged
+    depth-0 ceiling of 10000 tightens. To restore the previous
+    behaviour: -OoINLINESITEBUDGET=0.
+
+  * is_assembler_inlineable diagnostics. The asm-inline gate in
+    psub.pas previously returned a bare boolean; the call site emitted
+    just "Note: assembler not yet supported inside inline procedure/
+    function" with no clue why. The gate now returns a specific reason
+    string per failure mode -- missing nostackframe, non-trivial return
+    type with the type name, param N has unsupported type/spec/size,
+    asm body contains unsplicable construct, and a new explicit
+    pocall_register check that emits "calling convention is not
+    register (got pocall_stdcall)". The pocall_register gate makes the
+    rejection reason clear up-front instead of bubbling out of
+    paraloc_is_single_intreg. On i386 register CC is the default
+    proccalloption, so the user does NOT need to write `register;`.
+
+  * Inline-asm rejection now blocks the splice. check_inlining
+    (ncal.pas) used to set cnf_do_inline based only on (po_inline +
+    has_inlininginfo + heuristics) and ignored the
+    pio_inline_not_possible flag that psub.pas/is_assembler_inlineable
+    set on rejection -- the flag was only consulted at the
+    cg_n_no_inline warning site. As a result, an `assembler; inline;`
+    proc declared without `nostackframe` was correctly rejected by the
+    gate, but pass1_inline still ran and crashed when it tried to
+    splice an asm body that contained a prologue/epilogue. Fixed:
+    check_inlining bails early when pio_inline_not_possible is set,
+    emits a diagnostic note pointing at the prior
+    parser_n_not_supported_for_inline message.
+
   * Inline-heuristic knobs. The two inlining decisions in the
     compiler -- the auto-inline gate and the per-call-site gate --
     previously had hard-coded magic numbers (25 and a depth-decay

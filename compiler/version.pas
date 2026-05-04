@@ -29,8 +29,8 @@ interface
        { version string }
        version_nr = '3';
        release_nr = '3';
-       patch_nr   = '10';
-       minorpatch = '';
+       patch_nr   = '9';
+       minorpatch = 'a';
 
        { word version for ppu file }
        wordversion = ((ord(version_nr)-ord('0')) shl 14)+
@@ -98,7 +98,7 @@ implementation
 
 function version_string:string;
 begin
-  version_string := version_nr+'.'+release_nr+'.'+patch_nr;
+  version_string := version_nr+'.'+release_nr+'.'+patch_nr+minorpatch;
 end;
 
 
