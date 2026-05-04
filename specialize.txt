@@ -1,0 +1,578 @@
+================================================================
+ specialize-set parameter modifier -- design + implementation notes
+ Lives on feature/dynamic-params after the ppreproc framework lands.
+================================================================
+
+## Overview
+
+Adds a parameter modifier that compiles one source procedure into:
+  * N specialised copies of the procedure, one per value in the set,
+    each with the parameter substituted by a compile-time constant; and
+  * a dispatch stub with the original signature that selects the right
+    specialisation at runtime via a `case' statement.
+
+User writes:
+
+    procedure f(a: integer; k: integer specialize [1, 4, 8]);
+    begin
+      writeln(a + k * 100);
+    end;
+
+Compiler internally treats it as if the user had written:
+
+    generic procedure f<const K: integer>(a: integer);
+    begin
+      writeln(a + K * 100);
+    end;
+
+    procedure f(a: integer; k: integer); inline;
+    begin
+      case k of
+        1: specialize f<1>(a);
+        4: specialize f<4>(a);
+        8: specialize f<8>(a);
+      end;
+    end;
+
+At a call site:
+
+    f(10, 4);     { k=4 is a literal; dispatch stub gets inlined,
+                    case k of 4: specialize f<4>(10) folds at
+                    compile time, ends up as a direct call to the
+                    K=4 specialisation. K is a compile-time constant
+                    in that body, so writeln(a + 4 * 100) is folded
+                    to writeln(a + 400). }
+
+    var v: integer;
+    f(10, v);     { v is a runtime value. Stub is inlined; case
+                    becomes a real jump table over {1, 4, 8}; arms
+                    call out to the specialisations. Each
+                    specialisation still has K as a const inside,
+                    so writeln(a + 4 * 100) etc. are still folded
+                    inside their respective bodies. Only the
+                    *dispatch* is runtime. }
+
+## Why this exists
+
+Pascal has generics with const parameters (`generic F<const K: T>')
+since 3.3.x, but the user has to write `specialize F<4>(a)' at every
+call site. That's noisy and forbids runtime dispatch.
+
+The specialize-set modifier folds both forms behind one declaration:
+constant call sites get the static-specialisation benefit; runtime
+call sites get a small dispatch table over a fixed-size set. Code
+size is bounded (cap at 64 specialisations); call-site syntax is
+identical to a normal proc call.
+
+Conceptually it's a sugar for "I want this proc specialised for these
+specific values, with a runtime fallback when I happen to have a
+runtime value." The "fallback" is *not* a generic-over-arbitrary-K
+runtime version; it's just a case-dispatch over the closed set. If
+the runtime value misses the set, behaviour matches Pascal's normal
+`case' statement: RunError(201) under {$R+}, undefined otherwise.
+
+## Syntax
+
+    param-name : type SPECIALIZE [ set-literal ]
+
+Where set-literal is a regular Pascal set constructor:
+
+    [ 1, 4, 8 ]            { enumerated literal }
+    [ 0..3 ]               { dense range }
+    [ 0, 2, 4..7 ]         { hybrid }
+
+Constraints (compile-time-checked):
+
+  * Type must be ordinal (integer family, char, enum, boolean,
+    Pascal subrange).
+  * All set elements must be compile-time constants assignment-
+    compatible with the parameter type.
+  * Total number of specialisations across the cartesian product
+    of all `specialize'-bearing parameters in the same proc must
+    be <= 64.
+  * `specialize' on a virtual method is rejected (would require
+    64 vtable slots).
+  * `f(k: integer)' and `f(k: integer specialize [...])' overloads
+    in the same scope are rejected (overload ambiguity until v2 or
+    later considers a unified resolution).
+
+Multiple `specialize'-modified params per proc are allowed; the
+dispatch is a nested `case' over the cartesian product. Cap of 64
+is on the product, not per-param: [0..3] x [0..3] = 16 (OK);
+[0..7] x [0..7] = 64 (OK; at the limit); [0..15] x [0..15] = 256
+(rejected).
+
+## Dispatch semantics
+
+### Constant call site
+Compiler folds via the dispatch stub being marked `inline'. After
+inlining at the call site, the case scrutinee is a literal; `case
+<literal> of N: specialize f<N>(...)' collapses to a direct call to
+the matching specialisation. Standard FPC inliner + tcasenode
+constant-fold do this without any feature-specific code.
+
+### Variable call site
+Stub is inlined (or called as a normal proc if the inliner declines
+-- both produce correct code, just different binary size). The case
+becomes a real jump table over the set values, each arm calling the
+corresponding specialisation.
+
+### Cross-unit dispatch
+Generics are already serialised cross-unit (FPC stores generic
+bodies as token buffers in the .ppu). Inline-marked procs are also
+serialised cross-unit. So the dispatch stub's body is visible to
+importing units; the inliner can fold constant call sites in unit B
+that import the proc from unit A. **No special cross-unit metadata
+is needed.**
+
+The only caveat: when the inliner declines (large set, complex call
+context, or build flags disabling inlining), cross-unit literal-arg
+calls fall through to runtime case-dispatch. Correct, just not folded.
+
+## Inlining rule
+
+  * Constant call site -> single specialisation chosen, normal
+    inlining candidate. The user's `inline' modifier on the source
+    proc applies to the specialisation.
+  * Variable call site -> case-dispatch. **Never inline more than
+    one specialisation into the dispatch arms.** With up to 64
+    arms per call site and N call sites, fanout would explode the
+    binary. The dispatch stub itself is inline (it's small, just
+    a case); the per-arm calls are real calls.
+
+The dispatch stub is `inline'. The per-K specialisations inherit the
+user's `inline' modifier (if any) -- the framework doesn't add
+extra inline marks.
+
+## What we explicitly chose NOT to do
+
+  * **No `*' fallback** that gives a runtime-K generic version. The
+    body is written assuming K is constant (the user can rely on
+    `case K of', loop unrolling indexed by K, etc.); a runtime-K
+    fallback would silently degrade those into runtime behaviour.
+    If the user wants a runtime fallback they write a separate
+    overload.
+  * **No multi-pass framework composition.** If two features want
+    to apply to the same proc they must be at different grammar
+    points, or one explicitly invokes the other's lowering API.
+  * **No call-site rewrite to bypass the stub for cross-unit
+    constant arguments.** The inliner handles this automatically;
+    if a future feature needs guaranteed cross-unit folding (e.g.
+    a 200-arm set where the inliner refuses), a follow-up adds
+    a deterministic call-site hook with a small ppu metadata field.
+    Tier-2 work; deferred.
+
+================================================================
+ The preprocessor (ppreproc.pas)
+================================================================
+
+Lives at compiler/ppreproc.pas. Implemented in commit cf8cb33eaab.
+
+## What it is
+
+A token-level preprocessor framework. Lets a compiler-internal sugar
+feature register a "pass" that fires at a known grammar point in the
+parser, captures some tokens from the user's source, transforms them,
+and injects the result back into the scanner so the parser reads the
+rewritten form.
+
+NOT a C-preprocessor-style macro system. NOT an AST-rewriter. The
+unit of work is FPC's existing scanner token stream
+(serialised/deserialised by recordtoken/replaytoken in scanner.pas,
+the same machinery FPC uses for cross-unit generic body replay).
+
+## Why token-based
+
+  * Strings would need their own re-tokeniser; ambiguity around
+    comments, line numbers, macro arg tokenisation. Not worth it.
+  * AST-based requires the input to already be parseable on its own.
+    Many sugar features want to rewrite *partial declarations*
+    (e.g. a parameter modifier in the middle of a param list).
+  * Tokens are the right level: scanner already produces them,
+    they carry source positions automatically, the parser+typecheck+
+    codegen just see them as if they were user input.
+
+## Public API
+
+In compiler/ppreproc.pas:
+
+  type
+    tppreproc_point = (
+      pp_at_param_modifier   { just after a parameter type was parsed }
+      { add new points here as features need them }
+    );
+
+    tppreproc_origin = record
+      triggered_at: tfileposinfo;
+      feature: ansistring;     { short tag, used in error annotations }
+    end;
+
+    tppreproc_buf = class
+      data: tdynamicarray;     { token bytes; format = scanner record/replay }
+      origin: tppreproc_origin;
+    end;
+
+    tppreproc_handler = function: boolean;
+
+    tppreproc_pass = record
+      name: ansistring;
+      point: tppreproc_point;
+      trigger: ttoken;          { match against current_scanner.token }
+      trigger_id: ttoken;       { match against current_scanner.idtoken }
+      handler: tppreproc_handler;
+    end;
+
+  procedure ppreproc_register(const pass: tppreproc_pass);
+  function  ppreproc_try_dispatch(point: tppreproc_point): boolean;
+
+  function  ppreproc_capture_begin(const origin: tppreproc_origin): tppreproc_buf;
+  procedure ppreproc_capture_end(b: tppreproc_buf);
+
+  function  ppreproc_clone(src: tppreproc_buf): tppreproc_buf;
+  procedure ppreproc_inject(b: tppreproc_buf);
+
+## How dispatch works
+
+The parser calls ppreproc_try_dispatch(<point>) at well-defined hook
+points. Currently wired:
+
+  pdecsub.pas:419 (just after `single_type' returns a parameter type)
+    -> ppreproc_try_dispatch(pp_at_param_modifier);
+
+The dispatcher walks the registered passes:
+
+  1. Skip passes that don't match `point'.
+  2. For each remaining pass, check whether
+       (current_scanner.token == pass.trigger) AND
+       (current_scanner.idtoken == pass.trigger_id)
+     using NOTOKEN as a "don't filter on this field" sentinel.
+  3. On match, invoke pass.handler. If the handler returns true,
+     stop dispatching. Otherwise continue with the next pass.
+
+When zero passes are registered for a point, dispatch is one walk of
+an empty array. Cost: ~1 cycle per parse-hit. Negligible.
+
+## How capture/inject work
+
+Capture wraps `current_scanner.startrecordtokens(buf)' / `stoprecordtokens'.
+Every token the scanner emits between begin and end is appended to
+the buffer in scanner-internal serialisation format (token + idtoken
++ payload + position-update markers).
+
+Inject wraps `current_scanner.startreplaytokens(buf, false)'. The
+scanner saves its current state to a `replaystack' frame, installs
+the buffer, seeks to position 0, and reads the first token. From
+this point onwards, `consume(...)' and equivalent advance through
+the buffer. When the buffer is exhausted, the scanner pops the
+replaystack and resumes the original input.
+
+KEY CONSTRAINT: only one record buffer can be active at a time
+(internalerror 200511173 in scanner.pas:3286 if you try to nest).
+ppreproc_capture_begin asserts this with internalerror 2026050401.
+Replay buffers CAN nest -- each `startreplaytokens' pushes a frame.
+
+## How tokens carry positions
+
+The scanner records position changes via special markers:
+
+  ST_FILEINDEX : new file index
+  ST_LINE      : new line number
+  ST_COLUMN    : new column
+
+These are emitted whenever `current_tokenpos' differs from the last
+recorded position, so a captured buffer carries enough information
+to reconstruct the user-source position of every token. On replay,
+the scanner updates `current_filepos' from these markers, so an
+error fired by the parser while reading from the buffer points back
+to the user's source.
+
+This is the "default" half of the hybrid position model. The other
+half -- "expanded from <feature> at <pos>" annotations -- requires
+the error printer to read tppreproc_buf.origin and append to the
+diagnostic. THAT IS NOT YET WIRED. The origin trail is captured but
+unused. Wiring it is straightforward (~30 lines in verbose.pas) but
+deferred.
+
+## Cost model
+
+Cost when a grammar point has zero registered passes: 1 cycle (array
+length check).
+
+Cost when a pass matches and runs:
+  * Trigger comparison: 1-2 cycles.
+  * Handler invocation: depends on handler.
+  * For handlers that capture: scanner pays per-token byte writes
+    (~bytes-per-token, dominated by ident text). Captured buffer
+    of ~500 tokens is ~5-10 us on modern hardware.
+  * For handlers that inject: replay reads from the buffer (faster
+    than scanning real source -- no character-level lex). Cost ~=
+    a normal parse of the equivalent text.
+
+Realistic budget for the user's 66k-line project: <0.1% compile-time
+overhead even with the specialize-set feature in widespread use. The
+only way to make it expensive is to register at a hot grammar point
+(e.g. statement-start) and run heavy handlers there. Don't do that.
+
+## Adding a new grammar point
+
+  1. Add an entry to the `tppreproc_point' enum in ppreproc.pas
+     interface section. Keep it documented (one-line comment
+     describing the parser state when it fires).
+  2. Find the corresponding parser hook site. Add a single line:
+       ppreproc_try_dispatch(pp_<your_point>);
+  3. That's it.
+
+Don't pick noisy points. Statement-start, expression-start,
+identifier-resolution -- these fire millions of times per compile.
+Stick to declaration boundaries: param-modifier, proc-directive,
+decl-start, after-`type'-block, etc.
+
+## Adding a new sugar feature
+
+  1. Implement a `tppreproc_handler' function. Decide what trigger
+     (token + idtoken) it fires on.
+  2. Register the pass somewhere that runs at compiler init.
+     For specialize-set, that'll be in a new pspecset.pas (or
+     similar) feature unit's `initialization' section. The unit
+     has to be `uses'd by something that gets pulled into the
+     build (most easily pdecsub.pas).
+  3. The handler is called when the parser is sitting on the
+     trigger token, AT the grammar point where dispatch fired.
+     It owns the parser state: it can `consume' tokens, call
+     `ppreproc_capture_begin' / `_end' to build a buffer, call
+     `ppreproc_inject' to feed a buffer back through, etc.
+  4. Return true if the construct was consumed (parser should not
+     try further passes), false otherwise.
+
+================================================================
+ specialize-set implementation plan (next session)
+================================================================
+
+The framework is in place. The current registered handler
+(`ppreproc-smoke', in ppreproc.pas's initialization block) is a
+no-op that captures+discards. Replace it with the real handler.
+
+Recommended file structure:
+
+  compiler/pspecset.pas        new feature unit; owns the handler
+                               and registers the pass at init time.
+                               Replaces the smoke handler currently
+                               living inside ppreproc.pas.
+
+The smoke handler should be removed from ppreproc.pas's
+initialization block when pspecset starts registering its handler
+-- they trigger on the same (point, token, idtoken) tuple, and the
+dispatcher tries them in registration order, so a real handler at
+pspecset would shadow the smoke one. But it's cleaner to remove
+the smoke entirely.
+
+## Commit plan (revised, narrower than my earlier estimates)
+
+### Commit A: parse the set, store on procdef sidecar
+
+The handler runs when parser is on `specialize' after a parameter
+type. Tasks:
+
+  1. Consume `specialize'.
+  2. Consume `[' (use ppreproc_capture_begin starting here? or
+     parse manually? -- prefer manual: we want the parsed values,
+     not raw tokens, since we'll need integer values to emit the
+     case arms later).
+  3. Parse comma-separated set elements: each is a constant
+     expression (integer literal, named const, subrange `a..b').
+     Use `comp_expr' from pexpr.pas; require result to be
+     ordconstn (constant fold). For subranges, expand to all
+     values in the range.
+  4. Consume `]'.
+  5. Validate:
+     * type ordinal
+     * all values assignment-compatible with the parameter type
+     * cardinality after expansion <= 64 (configurable cap)
+  6. Store set values + parameter index on a sidecar keyed by the
+     procdef being parsed. Use a TFPHashList in pspecset, indexed
+     by procdef pointer.
+  7. Don't emit anything yet. Return true (consumed).
+
+Result: same observable behaviour as the current smoke pass. Test
+that the sidecar is populated by adding a -vd diagnostic listing
+the parsed values. Commit and verify.
+
+### Commit B: capture + inject the proc body via ppreproc
+
+Goal: when a specialize-bearing proc's full declaration is parsed,
+capture the entire decl (header + body) into a buffer, then re-emit
+it twice -- once as a generic, once as a dispatch stub.
+
+This is the big commit. Two sub-steps:
+
+  B1. CAPTURE. The handler currently runs IN THE MIDDLE of the
+      parameter list -- the rest of the parameter list and the
+      body haven't been parsed yet. To capture the whole decl, we
+      need to either:
+
+        (a) Restart parsing of the decl from the top. Means
+            backtracking the parser, which is hard. Or:
+
+        (b) Don't capture the whole decl. Instead, let normal
+            parsing continue; record only the body via the existing
+            `psub.pas:2680' generic-body capture (which already
+            records into procdef.generictokenbuf). Use the procdef
+            sidecar from commit A to flag this proc as "needs
+            specialize-set lowering after body parse".
+
+      Go with (b). Less invasive. The body capture already happens
+      for generics; we just need to flag the proc as generic-with-
+      const-K from the start so the existing capture fires.
+
+      To flag: in the handler from commit A, call procdef.initgeneric
+      and add a const-generic param `K' of the parameter's type.
+      Remove the regular parameter from `pd.parast'. Now the body,
+      when parsed, treats `k' as a const-generic param (resolves
+      via genericparas instead of parast).
+
+      Important detail: the const-generic param's NAME must match
+      the user's parameter name (`k') so body references work
+      without rewriting. FPC accepts a const-generic param named
+      `k' the same way it accepts type-generic param names.
+
+  B2. INJECT. After the proc's body is fully parsed (psub.pas
+      finishes the procdef), look up the sidecar. If the procdef
+      has a specialize-set entry, synthesise the dispatch stub:
+
+        * New procdef with the original signature (with `k' as a
+          regular param of type T).
+        * Body: build a token stream representing
+            `begin case k of <values>: specialize <gename><K>(args);
+                  ...
+            end end;'
+        * Mark inline (po_inline).
+        * Add to the same scope as the original.
+
+      The original procdef -- now a generic with const-K -- gets
+      hidden from normal lookup OR renamed (e.g. its own name is
+      kept but it lives only in the genericdef table). The
+      dispatch stub takes over the user-visible name.
+
+      Building the synthetic body: this is where the framework's
+      transform primitives become useful. We need to emit tokens
+      like `begin', `case', `k', `of', integer literals, `:',
+      `specialize', etc. -- and feed them through a buffer for
+      replay. ppreproc.pas currently has `clone' but no `emit_*'
+      helpers. ADD THEM in this commit:
+
+        ppreproc_emit_keyword(buf, t)          { _BEGIN, _CASE, ... }
+        ppreproc_emit_punct(buf, t)            { _COLON, _SEMICOLON, ... }
+        ppreproc_emit_ident(buf, name)         { writes _ID + orgpattern }
+        ppreproc_emit_intliteral(buf, n)       { _INTCONST + pattern }
+
+      Implementation: temporarily install the new buffer as the
+      scanner's recordtokenbuf, set scanner state to the desired
+      token, call `current_scanner.recordtoken', repeat, restore.
+
+### Commit C: cap, virtual rejection, overload guard, -vd polish
+
+  * Reject `specialize' on virtual methods (check po_virtualmethod
+    in the handler).
+  * Reject overload of specialize-set with non-specialize-set
+    same-name proc in same scope (extra check during proc
+    registration).
+  * Cap of 64 enforced at parse time (already done in commit A).
+  * `-vd' messages for: pass match, set values parsed,
+    specialisation count emitted, dispatch stub built.
+  * Remove the `ppreproc-smoke' pass from ppreproc.pas's
+    initialization (pspecset's pass replaces it).
+
+### Commit D: smoke tests under share\
+
+Bring back share\specfn1.pas (already exists), add:
+
+  share\specfn1.pas    constant + variable call sites; verifies
+                       expected output AND disassembly shows
+                       distinct symbols for each constant call.
+  share\specfn2.pas    multi-param specialize (cartesian);
+                       verify correct output for each combo.
+  share\specfn3.pas    range form `[0..3]'; verify all four
+                       specialisations emit.
+  share\specfn4.pas    cross-unit -- specfn4_a.pas declares the
+                       proc, specfn4_b.pas calls it both with
+                       a constant and a variable.
+  share\specfn5.pas    cap test -- a 65-element set must fail
+                       to compile cleanly with a clear error.
+  share\specfn6.pas    virtual-method rejection.
+  share\specfn7.pas    overload rejection.
+
+Each pinned to the new compiler via -Furtl<ver>; .bat scripts
+follow the doasm[N].bat pattern.
+
+## Open implementation questions
+
+  * **Naming**: what is the mangled name of the dispatch stub vs
+    the per-K specialisations? FPC's default mangling is
+    `P$<unit>_$$_<NAME>$<paratypes>'. The const-generic
+    instantiations get `..._SPECIALIZED$<concrete_type_or_value>'
+    appended. Verify by inspecting `objdump -t' on a build before
+    deciding whether to override.
+
+  * **Exposing the generic publicly**: should `specialize f<2>(...)'
+    work AT a call site even if the user never wrote that
+    explicitly? (Probably yes -- the generic is just a normal
+    generic; no harm in users calling it directly.)
+
+  * **Body parsing with const-K param**: confirm by experiment
+    that adding a const-generic-param to a procdef BEFORE the body
+    is parsed correctly resolves identifier references. The
+    existing `generic procedure f<const K: integer>(...)' syntax
+    works; this commit-2-B1 step is reproducing that effect from
+    a parameter modifier instead of from a `<const K: T>' clause.
+
+  * **Replay of generic body during specialisation**: the existing
+    pgenutil.pas code at line 2050+ replays a generic's body when
+    a specialisation is requested. The dispatch stub will request
+    specialisations via `specialize f<1>(...)` etc., so this path
+    fires automatically once the proc is set up as a generic. No
+    new code needed.
+
+## Estimate
+
+Commit A: ~150 LOC, 1 day. Test: -vd shows parsed values.
+Commit B: ~400 LOC, 3-4 days. Test: smoke test compiles with
+          distinct call symbols per constant call site.
+Commit C: ~100 LOC, 0.5 days. Tests: rejection paths fail cleanly.
+Commit D: ~400 LOC of test programs, 1 day.
+
+Total: ~5-6 working days plus inevitable debugging.
+
+================================================================
+ Pointers
+================================================================
+
+Existing code:
+  compiler/ppreproc.pas           the framework
+  compiler/pdecsub.pas:419        the dispatch hook
+  compiler/scanner.pas:236        startrecordtokens API
+  compiler/scanner.pas:240        startreplaytokens API
+  compiler/scanner.pas:3630       recordtoken (token serialisation)
+  compiler/scanner.pas:3816       replaytoken (token deserialisation)
+  compiler/psub.pas:2680          where the existing generic-body
+                                  capture fires (the model for B1)
+  compiler/pgenutil.pas:2050      generic-body replay during
+                                  specialisation (no new code; runs
+                                  automatically once the proc is
+                                  marked generic)
+  compiler/symconst.pas:387       po_inline (mark stub inline)
+  compiler/symconst.pas:340       po_virtualmethod (reject)
+
+Worktree:
+  C:\claudefpc\trunk-features\dynamic-params on branch
+  feature/dynamic-params; commits 93b8bb1bb2c (parser spike) +
+  cf8cb33eaab (ppreproc framework) atop `working'.
+
+Smoke test:
+  share\specfn1.pas + share\dospec1.bat
+  Run via run-in-dos.ps1 -ShareDir C:\claudefpc\logs\bench\spec1\share
+
+Memory of related work:
+  see new_inline.txt for the inline-asm v2 design that introduced
+  similar token-buffer mechanics; the project_asm_inline_v2cd_attempt.md
+  memory captures one failed attempt at programmatic AST splicing
+  (which we are NOT doing here).
