@@ -124,6 +124,14 @@ interface
           procedure createlocaltemps(p:TObject;arg:pointer);
           function  optimize_funcret_assignment(inlineblock: tblocknode): tnode;
           function  pass1_inline:tnode;
+       public
+          { Public entry for SCC inline-deferral drain (pmodules). The
+            callnode was already through pass_1 once during the original
+            generate_code so all callinitblock / callcleanupblock /
+            funcretnode / hidden parameters / methodpointer-in-temp
+            state is already set up; call this when the provider's
+            inlininginfo has become available between defer and drain. }
+          function  scc_drain_inline:tnode;
        protected
           pushedparasize : longint;
           { Objective-C support: force the call node to call the routine with
@@ -5905,6 +5913,29 @@ implementation
         writeln('**************************',tprocdef(procdefinition).mangledname);
         printnode(output,result);
 {$endif DEBUGINLINE}
+      end;
+
+
+    function tcallnode.scc_drain_inline:tnode;
+      { Public entry for the SCC inline-deferral drain. The original
+        pass_1 of this callnode set cnf_inline_pending (not cnf_do_inline),
+        so maybe_create_funcret_node was skipped and funcretnode is nil
+        if the result type didn't otherwise force its creation (managed
+        type / ret-in-param). Now that the caller has flipped cnf_do_inline
+        on, run the funcret setup so pass1_inline's createlocaltemps
+        finds funcretnode populated; otherwise it'd hit IE 200709081.
+
+        Also prepare init/cleanup blocks for inline expansion -- they
+        were typecheck'd in the original pass_1 but pass1_inline
+        re-typechecks them (and they may already be empty). Skipping
+        since they're idempotent.
+
+        We do NOT re-call gen_hidden_parameters / register_created_object_types
+        / maybe_load_in_temp(methodpointer) -- those are set up exactly
+        once and would explode on re-entry. }
+      begin
+        maybe_create_funcret_node;
+        result:=pass1_inline;
       end;
 
 end.

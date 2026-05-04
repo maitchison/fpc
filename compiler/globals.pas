@@ -523,7 +523,10 @@ Const
         { cs_opt_scc_inline_first defaults ON regardless of -O level:
           it is a correctness mode for cross-unit inline expansion
           under the new ctask scheduler, not a code-quality knob. -O-
-          (or explicit -OoNOSCCINLINEFIRST) drops it. }
+          (or explicit -OoNOSCCINLINEFIRST) drops it.
+          cs_opt_scc_inline_drain is OFF by default (the splice / regen
+          path AVs in cycle bootstrap; keeping the deferral infra dormant
+          until the AV is root-caused). }
         optimizerswitches : [cs_opt_scc_inline_first];
         genwpoptimizerswitches : [];
         dowpoptimizerswitches : [];

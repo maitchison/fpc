@@ -174,11 +174,51 @@ implementation
 
     function strip_pass1_done(var n: tnode; arg: pointer): foreachnoderesult;
     { Walk callback: clear tnf_pass1_done so firstpass re-runs on this node.
-      Used by the SCC regen path to wake up cnf_inline_pending callnodes
-      (and their ancestors so the pass walk actually descends to them). }
+      No longer used by the active regen path (kept in case future work
+      wants a re-run-pass_1 strategy). }
     begin
       result:=fen_true;
       exclude(n.transientflags,tnf_pass1_done);
+    end;
+
+    function splice_pending_inline(var n: tnode; arg: pointer): foreachnoderesult;
+    { Targeted inline splice: for each cnf_inline_pending callnode whose
+      provider now has_inlininginfo, call pass1_inline directly and replace
+      the call node with the result. Bypasses tcallnode.pass_1's prep paths
+      (which aren't safe to re-run on an already-passed callnode). The
+      callnode WAS through pass_1 once during the original generate_code,
+      so callinitblock / callcleanupblock / funcretnode / methodpointer-
+      in-temp / hidden parameters are already set up -- pass1_inline can
+      consume them as if it had been called naturally. }
+    var
+      cn: tcallnode;
+      inlined: tnode;
+      st: pinline_retry_state;
+    begin
+      result:=fen_true;
+      if n.nodetype<>calln then exit;
+      cn:=tcallnode(n);
+      if not (cnf_inline_pending in cn.callnodeflags) then exit;
+      if not ((cn.procdefinition.typ=procdef) and
+              tprocdef(cn.procdefinition).has_inlininginfo) then exit;
+
+      { mark inlinable, then expand via the standard mechanism }
+      exclude(cn.callnodeflags,cnf_inline_pending);
+      include(cn.callnodeflags,cnf_do_inline);
+      inlined:=cn.scc_drain_inline;
+      if not assigned(inlined) then
+        exit;
+      { replace the callnode with the inlined block. n is var-by-ref so
+        the parent's pointer is updated. cn (= old n) is freed by
+        pass1_inline's own cleanup or by the parent later -- DO NOT
+        explicitly free here, see the comment in tcallnode.pass1_inline
+        at the inlineblock.free path. Actually pass1_inline returns a
+        NEW node and doesn't free self; we need to free the original. }
+      n.free;
+      n:=inlined;
+
+      st:=pinline_retry_state(arg);
+      inc(st^.retried);
     end;
 
     function count_inlined_after_regen(var n: tnode; arg: pointer): foreachnoderesult;
@@ -199,15 +239,32 @@ implementation
     end;
 
     function regenerate_pi_with_inlines(pi: tcgprocinfo): boolean;
-    { Re-runs tcgprocinfo.generate_code on a fresh AST copy of pi.ast_snapshot.
-      The first generate_code emitted plain CALLs because cnf_inline_pending was
-      set on call sites whose provider impls hadn't compiled yet. Now that the
-      drain has confirmed at least one of those providers has inlininginfo, we
-      throw away the original aktproccode and start over -- pass_1's
-      check_inlining will see has_inlininginfo=true this time and pass1_inline
-      will splice the body in the standard way. Returns true if regen succeeded
-      and the procinfo has been recorded; false if the snapshot was missing or
-      regen produced nothing usable. Caller has already set current_module. }
+    { Targeted-splice regen path. Snapshot was taken AFTER do_firstpass and
+      BEFORE OptimizeNodeTree / add_entry_exit_code. We:
+
+        1. Free the post-pass_2 code, swap in a copy of the snapshot.
+        2. Reset aktproccode/aktlocaldata (recorded plain CALLs in the
+           first run; we want a fresh emission this time).
+        3. Set current_procinfo to pi -- pass1_inline reads it for various
+           parent-fp / capture / level checks.
+        4. Walk the snapshot, splice each cnf_inline_pending callnode
+           whose provider now has_inlininginfo via pass1_inline. Bypasses
+           tcallnode.pass_1's prep -- the call node was already through
+           pass_1 once, so callinitblock / callcleanupblock / funcret /
+           hidden parameters are already set up.
+        5. Set scc_regen_mode so generate_code skips wrap_proc_body
+           (snapshot is already wrapped) and skips do_firstpass (snapshot
+           is already pass_1'd; pass1_inline ran firstpass on each
+           inserted block as part of the splice).
+        6. Re-run generate_code -- runs OptimizeNodeTree, add_entry_exit_code
+           (which add their own asmnode markers fresh), pass_2, and the
+           normal record_generated_code_for_procdef path.
+
+      Returns true if regen succeeded and the procinfo has been recorded;
+      false if the snapshot was missing or no provider was actually ready. }
+    var
+      old_procinfo: tprocinfo;
+      st: tinline_retry_state;
     begin
       result:=false;
       if not assigned(pi.ast_snapshot) then exit;
@@ -220,9 +277,7 @@ implementation
         end;
       pi.code:=pi.ast_snapshot.getcopy;
 
-      { Reset pass_2 leftovers. tg/dfabuilder are nil after first pass_2.
-        aktproccode/aktlocaldata still hold the previous CALL emission --
-        free them so generate_code starts with empty lists. }
+      { Reset pass_2 leftovers. tg/dfabuilder are nil after first pass_2. }
       if assigned(pi.aktproccode) then
         pi.aktproccode.free;
       pi.aktproccode:=TAsmList.create;
@@ -230,31 +285,60 @@ implementation
         pi.aktlocaldata.free;
       pi.aktlocaldata:=TAsmList.create;
 
-      { Clear the deferral flag so generate_code's check at the bottom takes
-        the normal record_generated_code_for_procdef branch this time. We
-        also clear pi_has_pending_inline -- pass_1 will re-set it only if
-        some OTHER provider (different from the one we just resolved) is
-        still unfinished. The SCC state machine guarantees all peers are
-        at ms_compiling_waitfinish or later by the time we drain, so the
-        rest are providers from outside the SCC that genuinely haven't
-        compiled (extremely rare; we'll re-defer them and final-drain). }
       pi.scc_defer_active:=false;
       exclude(pi.flags,pi_has_pending_inline);
 
-      { Strip tnf_pass1_done from every node so do_firstpass re-runs.
-        The re-run will see cnf_inline_pending callnodes whose providers now
-        have inlininginfo, take the natural inline path (cnf_do_inline +
-        pass1_inline) and splice the body in. Other nodes hit the early-
-        exit again on second pass since they idempotently retain their
-        post-firstpass state. }
-      foreachnodestatic(pi.code,@strip_pass1_done,nil);
-      pi.scc_regen_mode:=true;
+      { Splice inlines into the snapshot. pass1_inline needs current_procinfo
+        set to pi (for things like is_nested_pd checks and parent-fp setup
+        in inlined sub-trees). }
+      old_procinfo:=current_procinfo;
+      current_procinfo:=pi;
       try
-        pi.generate_code;
-      finally
-        pi.scc_regen_mode:=false;
+        FillChar(st,sizeof(st),0);
+        try
+          foreachnodestatic(pi.code,@splice_pending_inline,@st);
+        except
+          on e: Exception do
+            begin
+              { pass1_inline tripped on something we didn't anticipate
+                (often an internalerror about funcret / parentfp). Bail
+                gracefully; caller will fall back to record_pi_unchanged
+                and ship plain CALLs. The provider isn't worse off than
+                slice 1 was. }
+              Comment(V_Inline,'SCC regen aborted for '+
+                pi.procdef.procsym.realname+' (will record plain CALLs): '+
+                e.message);
+              current_procinfo:=old_procinfo;
+              exit;
+            end;
+        end;
+        if st.retried=0 then
+          begin
+            current_procinfo:=old_procinfo;
+            exit;
+          end;
+      except
+        current_procinfo:=old_procinfo;
+        raise;
       end;
-      result:=not pi.scc_defer_active;
+
+      try
+        pi.scc_regen_mode:=true;
+        try
+          pi.generate_code;
+          result:=not pi.scc_defer_active;
+        finally
+          pi.scc_regen_mode:=false;
+        end;
+      except
+        on e: Exception do
+          begin
+            Comment(V_Inline,'SCC regen pass_2 aborted for '+
+              pi.procdef.procsym.realname+': '+e.message);
+            result:=false;
+          end;
+      end;
+      current_procinfo:=old_procinfo;
     end;
 
     procedure record_pi_unchanged(pi: tcgprocinfo);
@@ -302,15 +386,13 @@ implementation
               continue;
             inc(total_pi);
             inc(total_retried,st.retried);
-            { NOTE: regenerate_pi_with_inlines is currently disabled --
-              re-running pass_1 on a pass1-stripped snapshot triggers AVs
-              in nodes with rich state (e.g. callnodes that hit objc /
-              maybe_load_in_temp / hidden-param paths). The drain still
-              counts the would-be-retry callsites so the opportunity is
-              visible in the log; the original aktproccode (with plain
-              CALLs) is recorded unchanged. Future work: targeted
-              inline-only splice that doesn't re-run pass_1. }
-            record_pi_unchanged(pi);
+            if st.retried > 0 then
+              begin
+                if not regenerate_pi_with_inlines(pi) then
+                  record_pi_unchanged(pi);
+              end
+            else
+              record_pi_unchanged(pi);
           end;
         curr.pending_inline_procinfos.Clear;
         { Diagnostic so the SCC opportunity is visible in -vY logs even though

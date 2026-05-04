@@ -2177,13 +2177,15 @@ implementation
         { Print out nodes as they appear after the first pass }
         XMLPrintProc(True);
 {$endif DEBUG_NODE_XML}
-        { firstpass everything. In regen mode the caller has stripped
-          tnf_pass1_done from cnf_inline_pending callnodes (and their
-          ancestors so firstpass actually descends), so the re-run only
-          re-pass_1's the inline-pending sites and inlines them via the
-          natural pass1_inline path. Other nodes hit the early-exit. }
+        { firstpass everything. In regen mode the snapshot has already been
+          through do_firstpass once and the caller has spliced in inlined
+          blocks via pass1_inline (which firstpass'd them). Skip the
+          re-walk -- re-running tcallnode.pass_1 on a callnode that was
+          already through pass_1 once AVs in the objc / methodpointer-in-
+          temp / hidden-parameter prep paths. }
         flowcontrol:=[];
-        do_firstpass(code);
+        if not scc_regen_mode then
+          do_firstpass(code);
 
         { SCC inline-deferral (cs_opt_scc_inline_first):
           Snapshot AFTER do_firstpass so the tree is fully pass_1'd (every
@@ -2559,11 +2561,12 @@ implementation
               If we don't have a snapshot (rare: defer triggered without snapshot
               being taken), fall through to the immediate record -- no inline
               improvement but no regression either. }
-            { TEMP: deferral disabled while AV bisected. Snapshot is still
-              taken (cheap) so future re-enabling has the data. The
-              cs_opt_scc_inline_first switch is explicitly tested with the
-              UNDOCUMENTED -OoSCCINLINEDRAIN suboption -- not the regular
-              SCCINLINEFIRST -- so toggling without rebuild is possible. }
+            { Deferral path is gated on -OoSCCINLINEDRAIN (off by default
+              until the regen path is broadly verified). When on, parks
+              the procinfo on pending_inline_procinfos for the drain to
+              re-emit with inlines spliced. Restricted to top-level
+              functions -- truly-nested procinfos are owned by parent's
+              nestedprocs and could be freed before drain. }
             if (cs_opt_scc_inline_drain in current_settings.optimizerswitches) and
                (cs_opt_scc_inline_first in current_settings.optimizerswitches) and
                (pi_has_pending_inline in flags) and
