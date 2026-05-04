@@ -237,17 +237,26 @@ implementation
       end;
 
 
+    type
+      tasmnode_check_state = record
+        ok : boolean;
+        reason : ansistring;   { populated when ok=false }
+      end;
+      pasmnode_check_state = ^tasmnode_check_state;
+
     function gather_asmnode_check(var n: tnode; arg: pointer): foreachnoderesult;
       var
-        ok : pboolean;
+        st : pasmnode_check_state;
       begin
         result:=fen_true;
         if n.nodetype=asmn then
           begin
-            ok:=pboolean(arg);
+            st:=pasmnode_check_state(arg);
             if not asmnode_inline_safe(tasmnode(n)) then
               begin
-                ok^:=false;
+                st^.ok:=false;
+                if st^.reason='' then
+                  st^.reason:='asm body contains construct rejected by asmnode_inline_safe (label-ref, RIP-relative, or unsupported operand)';
                 result:=fen_norecurse_false;
               end;
           end;
@@ -283,47 +292,56 @@ implementation
       kept in ncal.pas (v2(c)) -- a permissive top-level gate would let RTL
       pure-asm procs with QWord/var/untyped paras through and crash the
       inliner. }
-    function is_assembler_inlineable: boolean;
+    function is_assembler_inlineable(out reason: ansistring): boolean;
       var
-        ok : boolean;
+        st : tasmnode_check_state;
         cpi : tcgprocinfo;
         i : longint;
         p : tparavarsym;
         pd : tprocdef;
       begin
         result:=false;
+        reason:='';
         if not (pi_is_assembler in current_procinfo.flags) then
-          exit;
+          begin reason:='not an assembler block (pi_is_assembler not set)'; exit; end;
         if not (po_assembler in current_procinfo.procdef.procoptions) then
-          exit;
+          begin reason:='proc lacks po_assembler'; exit; end;
         if not (po_nostackframe in current_procinfo.procdef.procoptions) then
-          exit;
+          begin reason:='missing nostackframe directive (required: assembler procs without it get a prologue/epilogue that cannot be safely spliced)'; exit; end;
+        { Calling convention must be `register` (the i386 default).
+          stdcall/cdecl/safecall/etc deliver paras via the stack; the
+          splice machinery only understands register-passed paras +
+          register return. The user does NOT need to write `register`
+          explicitly -- on i386 it is the default proccalloption. }
+        if current_procinfo.procdef.proccalloption<>pocall_register then
+          begin reason:='calling convention is not register (got '+proccalloptionStr[current_procinfo.procdef.proccalloption]+'); the splice path requires register-passed params and register return'; exit; end;
         cpi:=tcgprocinfo(current_procinfo);
         if not assigned(cpi.code) then
-          exit;
+          begin reason:='no code tree (parser produced empty body)'; exit; end;
         pd:=current_procinfo.procdef;
         if not is_void(pd.returndef) then
           begin
             if not paraloc_is_single_intreg(pd.funcretloc[calleeside]) then
-              exit;
+              begin reason:='non-trivial return type ('+pd.returndef.typename+'): only void or a single integer-class CPU register result is supported'; exit; end;
           end;
         if pd.maxparacount>0 then
           for i:=0 to pd.paras.count-1 do
             begin
               p:=tparavarsym(pd.paras[i]);
               if not assigned(p) then
-                exit;
+                begin reason:='param #'+tostr(i)+': symbol not assigned'; exit; end;
               if vo_is_hidden_para in p.varoptions then
                 continue;
               if not (p.varspez in [vs_value,vs_const]) then
-                exit;
+                begin reason:='param "'+p.realname+'": only value/const params supported (var/out/constref are not)'; exit; end;
               if not assigned(p.vardef) then
-                exit;
-              if (p.vardef.typ=formaldef) or
-                 not (p.vardef.size in [1,2,4]) then
-                exit;
+                begin reason:='param "'+p.realname+'": vardef not assigned'; exit; end;
+              if p.vardef.typ=formaldef then
+                begin reason:='param "'+p.realname+'": untyped (formaldef) params not supported'; exit; end;
+              if not (p.vardef.size in [1,2,4]) then
+                begin reason:='param "'+p.realname+'" ('+p.vardef.typename+', size='+tostr(p.vardef.size)+'): only 1/2/4-byte params fit a single i386 register; QWord/Int64/record/array not yet supported'; exit; end;
               if not paraloc_is_single_intreg(p.paraloc[calleeside]) then
-                exit;
+                begin reason:='param "'+p.realname+'": ABI does not deliver it in a single integer register (likely passed via stack at this calling convention)'; exit; end;
               { Default-value paras (e.g. RTL `get_caller_addr(framebp; addr:pointer=nil)`)
                 make the inline call site emit a load of the default-const sym at the
                 caller, then my v2(c) hook hoists that into a temp + rcd_load into the
@@ -332,11 +350,14 @@ implementation
                 compile crashed at $004AD3A0/$004DB1FB on system.ppu re-load), so reject
                 here until that path is debugged. }
               if assigned(p.defaultconstsym) then
-                exit;
+                begin reason:='param "'+p.realname+'" has a default value; default-const inline path triggers a known PPU writer bug, rejected for now'; exit; end;
             end;
-        ok:=true;
-        foreachnodestatic(cpi.code,@gather_asmnode_check,@ok);
-        result:=ok;
+        st.ok:=true;
+        st.reason:='';
+        foreachnodestatic(cpi.code,@gather_asmnode_check,@st);
+        result:=st.ok;
+        if not result then
+          reason:=st.reason;
       end;
 
 
@@ -353,6 +374,7 @@ implementation
       var
         i : integer;
         currpara : tparavarsym;
+        asm_reason : ansistring;
       begin
         result := false;
         { this code will never be used (only specialisations can be inlined),
@@ -362,9 +384,9 @@ implementation
           exit;
         if pi_has_assembler_block in current_procinfo.flags then
           begin
-            if not is_assembler_inlineable then
+            if not is_assembler_inlineable(asm_reason) then
               begin
-                _no_inline('assembler');
+                _no_inline('assembler ('+asm_reason+')');
                 exit;
               end;
             include(procdef.implprocoptions,pio_inline_asm);
