@@ -604,21 +604,114 @@ emit helpers. The two infra pieces are now in place:
 
 Three open implementation questions inherited from the spec are now
 load-bearing for SS-B:
-  1. Body parsing with const-K param -- still need to confirm by
-     experiment that flagging the procdef df_generic + populating
-     genericparas with a cconstsym mid-parse correctly resolves
-     identifier references to `k' inside the body.
-  2. Generic dummy procsym -- pdecsub.pas:1213-1257 sets up a dummy
-     `sp_generic_dummy' procsym so the generic name is reachable.
-     We need to do the equivalent for procdefs converted mid-parse.
+
+  1. ANSWERED 2026-05-05: mid-parse generic conversion is feasible
+     for `genericparas'/`df_generic' setup, BUT it triggers FPC's
+     full generic-decl machinery, which expects three things we
+     cannot easily provide from the param-modifier hook:
+
+       (i)   Token recording started at the proc decl's start
+             (pdecsub.pas:1262 calls startrecordtokens(genericdecl-
+             tokenbuf) AFTER `parse_proc_head' has set up the proc
+             name + initial parameter parsing). We arrive AFTER the
+             parameter type, so any recording would miss the header.
+       (ii)  `pdecsub.pas:1812' (and 3573) unconditionally call
+             stoprecordtokens when `df_generic + has_genericdecl-
+             tokenbuf' -- adding the latter without first starting
+             a recorder hits internalerror 200511174. Skipping the
+             genericdecltokenbuf alloc avoids that, BUT
+             `pgenutil.pas:2050' replays from genericdecltokenbuf
+             during specialisation, so its absence breaks any
+             user-written `specialize f<5>(...)'. (Not a problem
+             for our use-case -- we don't want users specialising
+             via generic syntax -- but the constraint is real.)
+       (iii) `pdecsub.pas:1240+' creates a dummy `sp_generic_dummy'
+             procsym so the user-name resolves via overload to the
+             generic. The mid-parse path skips this step.
+
+     Conclusion: trying to ride FPC's generic machinery from a
+     param modifier is the wrong path. Recommend the alternative
+     below instead.
+
+     Reproduction of the experiment is in commit history -- search
+     for "EXPT" prints. The experiment is reverted; SS-A is restored.
+
+  2. SUPERSEDED by (1)'s conclusion: dummy procsym is no longer
+     needed since we won't be marking the proc generic.
+
   3. Dispatch-stub injection point -- pp_after_proc_body fires inside
-     parse_body (psub.pas). For the synthetic `procedure f_dispatch
-     ... begin case k of ... end' to parse, we need to inject at a
-     decl boundary higher up. Two options: (a) inject before
-     parse_body returns and trust the parser's outer decl loop to
-     pick it up; (b) directly construct the dispatch procdef
-     in-memory without going through tokens. (a) matches the spec;
-     (b) is a fallback if (a) hits replay-state issues.
+     parse_body (psub.pas). Still load-bearing for either approach.
+
+RECOMMENDED PATH FORWARD FOR SS-B:
+
+Avoid FPC's generic machinery entirely. Use ppreproc directly:
+
+  * Add a new hook `pp_before_proc_body' in psub.pas, fired right
+    before `code := block(...)' on line 2687. (One-line addition,
+    same pattern as the two existing hooks.)
+  * In SS-A's handler, mark the sidecar as "needs body capture".
+    DO NOT touch the procdef -- vs stays as a regular `k: integer'
+    parameter. Body parses normally with k as a runtime variable.
+  * Register a pp_before_proc_body handler that calls
+    `ppreproc_capture_begin' if the sidecar wants capture.
+  * Register a pp_after_proc_body handler that calls
+    `ppreproc_capture_end' and then synthesises N specialised
+    wrappers + a dispatch stub, injecting them via
+    `ppreproc_inject'. Each wrapper looks like:
+
+        procedure f_K_<v>(<sig minus k>); inline;
+        const k = <v>;
+        begin
+          { captured body tokens }
+        end;
+
+    where the body tokens are appended verbatim from the captured
+    buffer. The const declaration shadows the missing parameter so
+    `k' resolves to <v> inside the body, and constant-folds wherever
+    used.
+
+  * The dispatch stub looks like:
+
+        procedure f(<original sig>); inline;
+        begin
+          case k of
+            <v1>: f_K_<v1>(<args minus k>);
+            <v2>: f_K_<v2>(<args minus k>);
+            ...
+          end;
+        end;
+
+    Mark `inline' so constant-arg call sites fold to a direct
+    `f_K_<v>' call after stub inlining + tcasenode constant fold.
+
+  * Rename the original procdef (the one that just parsed) to a
+    throwaway internal name, OR mark it as not-user-callable, so
+    the dispatch stub takes over the user-visible `f' name.
+    Cleanest: don't add the original procdef to the user-facing
+    procsym at all -- inject the wrappers + stub as new decls and
+    discard the original after capturing its body tokens. Need to
+    figure out how to "discard" cleanly without leaving dangling
+    refs from procsym.procdeflist.
+
+Open question on the new path: how to inject N+1 procedure decls at
+pp_after_proc_body so the parser's outer decl loop picks them up.
+The injection happens via `ppreproc_inject(buf)' which pushes onto
+the scanner's replaystack. After parse_body returns, the parser
+returns up the call chain; whether it then re-enters a "next decl"
+loop that consumes from the replaystack depends on where it was
+called from. Likely yes (pmodules.pas's main loop does), but worth
+verifying with a tiny inject-an-extra-proc smoke test before
+committing to the design.
+
+Constraints to remember:
+  * ppreproc has a single-record-buffer constraint. Procs that are
+    BOTH genuinely generic (have `<...>') AND have a specialize-set
+    modifier would conflict. Reject in SS-A's handler with an error
+    -- defer to a future v2 if it's ever needed.
+  * The synthesised wrappers' bodies use `const k = <v>;' to shadow
+    the parameter name. This works because Pascal's local const
+    declarations bind in the same scope as the local var block.
+    Test before relying on it.
 
 SS-C and SS-D: unchanged from earlier estimate (cap enforcement is
 already done in SS-A; -vd polish is largely there too; tests need
