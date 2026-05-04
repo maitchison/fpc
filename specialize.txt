@@ -571,6 +571,59 @@ Commits (oldest first):
   cf8cb33eaab  ppreproc: token-level preprocessor framework
   a86e4539dfd  specialize.txt: feature design + ppreproc.pas notes
                                  (this document)
+  f24427039bf  ppreproc: pp_after_proc_body hook + emit helpers
+                                 (token synthesis primitives for SS-B,
+                                  also requested by codegen-proc)
+  8f02b139c1e  specialize-set: SS-A real handler in pspecset.pas
+                                 (parses + validates + sidecars; no
+                                  desugar yet -- runtime semantics are
+                                  identical to a plain `T' parameter)
+
+Status: SS-A complete and tested. SS-B/C/D still pending.
+
+What works on this branch right now:
+  * `param: T specialize [v1, v2, a..b]' parses and stores a sidecar
+    keyed by procdef. Runtime behaviour is unchanged (the modifier is
+    a parser no-op until SS-B).
+  * Validation paths verified by share/specA_cap.pas (>64 cap),
+    share/specA_nonord.pas (string is not ordinal), and
+    share/specA_multi.pas (`a, b: T specialize [...]' rejected).
+  * Diagnostic via -vd: "specialize-set: parameter \"k\" -- N values,
+    cartesian total M".
+  * share/specA1.pas + share/spec_one.pas compile and run under
+    DOSBox-X with expected output.
+
+Pending work for the next session:
+
+SS-B is the big one. The current plan stays as written above -- (b)
+flag the procdef generic-with-const-K so existing body-capture fires,
+then synthesise the dispatch stub at pp_after_proc_body via the new
+emit helpers. The two infra pieces are now in place:
+  * pp_after_proc_body hook with tppreproc_proc_body_ctx context
+  * ppreproc_emit_keyword/punct/ident/ident_as/intliteral
+
+Three open implementation questions inherited from the spec are now
+load-bearing for SS-B:
+  1. Body parsing with const-K param -- still need to confirm by
+     experiment that flagging the procdef df_generic + populating
+     genericparas with a cconstsym mid-parse correctly resolves
+     identifier references to `k' inside the body.
+  2. Generic dummy procsym -- pdecsub.pas:1213-1257 sets up a dummy
+     `sp_generic_dummy' procsym so the generic name is reachable.
+     We need to do the equivalent for procdefs converted mid-parse.
+  3. Dispatch-stub injection point -- pp_after_proc_body fires inside
+     parse_body (psub.pas). For the synthetic `procedure f_dispatch
+     ... begin case k of ... end' to parse, we need to inject at a
+     decl boundary higher up. Two options: (a) inject before
+     parse_body returns and trust the parser's outer decl loop to
+     pick it up; (b) directly construct the dispatch procdef
+     in-memory without going through tokens. (a) matches the spec;
+     (b) is a fallback if (a) hits replay-state issues.
+
+SS-C and SS-D: unchanged from earlier estimate (cap enforcement is
+already done in SS-A; -vd polish is largely there too; tests need
+expanding once SS-B lands so we can verify per-K specialisations
+emit and dispatch correctly).
 
 To branch the next feature off this state:
   git -C C:/claudefpc/trunk worktree add -b feature/<name> \
