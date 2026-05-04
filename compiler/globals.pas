@@ -180,13 +180,28 @@ Const
          packrecords     : shortint;
          maxfpuregisters : shortint;
 
-         { Inline-heuristic knobs (commit 1: plumbing only).
+         { Inline-heuristic knobs.
            Exposed via -OoINLINE<NAME>=N (and the OPTIMIZATION directive).
-           Defaults reproduce pre-knob behaviour exactly:
+           Defaults (changed from upstream FPC 3.3.x to enable the flat
+           per-site model out of the box):
              inlineautolimit  = 25     (psub.pas auto-inline gate)
-             inlinehardcap    = 0      (no per-site absolute cap)
+             inlinehardcap    = 0      (no absolute body cap; SITEBUDGET
+                                        is the binding limit at defaults)
              inlinegrowthcap  = 0      (no per-proc cumulative cap)
-             inlinesitebudget = 0      (use legacy depth formula in ncal.pas)
+             inlinesitebudget = 1000   (flat per-site budget; replaces
+                                        the depth formula
+                                        sqrt(10000/(depth/3+1)) which
+                                        gave 10000/1000/251/100/52 at
+                                        depths 0..4. 1000 matches legacy
+                                        depth-1, so any candidate legacy
+                                        accepted at depth >=1 still
+                                        inlines; only the unhinged
+                                        depth-0 ceiling of 10000
+                                        tightens. Real inline candidates
+                                        are almost always <100 nodes;
+                                        1000 leaves comfortable headroom)
+           Set inlinesitebudget=0 explicitly to fall back to the legacy
+           depth formula.
            When cs_opt_size is set, callers may apply alternate -Os values;
            that is a frontend choice, not baked into the field semantics. }
          inlineautolimit   : longint;
@@ -561,7 +576,7 @@ Const
         inlineautolimit   : 25;
         inlinehardcap     : 0;
         inlinegrowthcap   : 0;
-        inlinesitebudget  : 0;
+        inlinesitebudget  : 1000;
 
         verbosity : V_Default;
 
