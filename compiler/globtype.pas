@@ -455,6 +455,11 @@ interface
           define: string[32];
        end;
 
+       toptimizernumericswitchinfo = record
+          name   : string[20];
+          defval : longint;
+       end;
+
     const
        OptimizerSwitchStr : array[toptimizerswitch] of string[18] = (
          'LEVEL1','LEVEL2','LEVEL3','LEVEL4',
@@ -466,6 +471,18 @@ interface
          'DEADSTORE','FORCENOSTACKFRAME','USELOADMODIFYSTORE',
          'UNUSEDPARA','CONSTS','FORLOOP',
          'SCCINLINEFIRST'
+       );
+
+       { Numeric -OoKEY=N knobs (parsed by dirparse.UpdateOptimizerStr).
+         These don't live in toptimizerswitch because their values are
+         longints rather than on/off; they're listed here so fpc -i / -io
+         can enumerate them alongside the boolean switches. Defaults must
+         match default_settings in globals.pas. }
+       OptimizerNumericSwitchStr : array[0..3] of toptimizernumericswitchinfo = (
+         (name: 'INLINEAUTOLIMIT';   defval: 25),
+         (name: 'INLINEHARDCAP';     defval: 0),
+         (name: 'INLINEGROWTHCAP';   defval: 0),
+         (name: 'INLINESITEBUDGET';  defval: 1000)
        );
        WPOptimizerSwitchStr : array [twpoptimizerswitch] of string[14] = (
          'DEVIRTCALLS','OPTVMTS','SYMBOLLIVENESS'

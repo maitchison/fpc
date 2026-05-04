@@ -519,6 +519,7 @@ const
   procedure ListOptimizations (OrigString: TCmdStr);
   var
     opt : toptimizerswitch;
+    n   : longint;
   begin
     SplitLine (OrigString, OptListPlaceholder, HS3);
     for opt:=low(toptimizerswitch) to high(toptimizerswitch) do
@@ -539,16 +540,34 @@ const
          end;
        end;
      end;
+    { Numeric -OoKEY=N knobs (longint-valued; parsed in dirparse). }
+    for n:=low(OptimizerNumericSwitchStr) to high(OptimizerNumericSwitchStr) do
+     begin
+      hs1:=OptimizerNumericSwitchStr[n].name+'=<n> (default '+
+           tostr(OptimizerNumericSwitchStr[n].defval)+')';
+      if OrigString = '' then
+       Comment (V_Normal, hs1)
+      else
+       begin
+        hs:=OrigString;
+        Replace(hs,OptListPlaceholder,hs1);
+        Comment(V_Normal,hs);
+       end;
+     end;
   end;
 
   procedure ListOptimizationsXML;
   var
-    opt: toptimizerswitch;
+    opt : toptimizerswitch;
+    n   : longint;
   begin
     WriteLn(xmloutput,'    <optimizations>');
     for opt:=low(toptimizerswitch) to high(toptimizerswitch) do
       if OptimizerSwitchStr[opt]<>'' then
         WriteLn(xmloutput,'      <optimization name="',OptimizerSwitchStr[opt],'"/>');
+    for n:=low(OptimizerNumericSwitchStr) to high(OptimizerNumericSwitchStr) do
+      WriteLn(xmloutput,'      <optimization name="',OptimizerNumericSwitchStr[n].name,
+              '" kind="numeric" default="',OptimizerNumericSwitchStr[n].defval,'"/>');
     WriteLn(xmloutput,'    </optimizations>');
   end;
 

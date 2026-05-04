@@ -275,6 +275,8 @@ const
       opt_level2optimizations = 'Level ~2~ optimizations';
       opt_level3optimizations = 'Level ~3~ optimizations';
       opt_level4optimizations = 'Level ~4~ optimizations';
+      { default ON in -O1+; tick to emit -OoNOSCCINLINEFIRST and disable }
+      opt_no_scc_inline_first = '~N~o SCC inline-first';
       { optimization processor target }
       opt_i386486 = 'i~3~86/i486';
       { Menu labels for -Cp<cputype> / -Op<cputype>. Note: FPC has no
@@ -1299,6 +1301,10 @@ begin
      AddBooleanItem(opt_useregistervariables,'x',idNone);
  {$endif m68k}
 {$endif I386}
+     { Generic across all CPUs. cs_opt_scc_inline_first lives in
+       genericlevel1optimizerswitches and defaults ON; the IDE box
+       is "tick to disable" -- emits -OoNOSCCINLINEFIRST. }
+     AddBooleanItem(opt_no_scc_inline_first,'oNOSCCINLINEFIRST',idNone);
    end;
   New(ProcessorOptimizationSwitches,InitSelect('O'));
   with ProcessorOptimizationSwitches^ do
