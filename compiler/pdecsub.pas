@@ -109,7 +109,9 @@ implementation
        { parser }
        scanner,
        syscinfo,
-       pbase,pexpr,ptype,pdecl,pparautl,pgenutil
+       pbase,pexpr,ptype,pdecl,pparautl,pgenutil,
+       ppreproc,
+       pspecset
 {$ifdef jvm}
        ,pjvm
 {$endif}
@@ -223,6 +225,7 @@ implementation
         need_array,
         is_univ: boolean;
         stoptions : TSingleTypeOptions;
+        pp_param_ctx : tppreproc_param_modifier_ctx;
 
         procedure handle_default_para_value;
           var
@@ -419,6 +422,19 @@ implementation
                     single_type(hdef,[stoAllowSpecialization]);
                     block_type:=bt_var;
                   end;
+
+                { ppreproc dispatch point: pp_at_param_modifier.
+                  Any registered pass triggered on the next scanner token
+                  fires here. Cost when no passes match: one walk of the
+                  passes array (typically empty). Context carries pd
+                  (the procdef being filled), sc (the param-syms in the
+                  current comma group), and hdef (the parsed type). }
+                begin
+                  pp_param_ctx.procdef := pd;
+                  pp_param_ctx.param_syms := sc;
+                  pp_param_ctx.param_type := hdef;
+                  ppreproc_try_dispatch(pp_at_param_modifier, @pp_param_ctx);
+                end;
 
                 { open string ? }
                 if is_shortstring(hdef) then

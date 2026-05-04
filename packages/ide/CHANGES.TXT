@@ -7,6 +7,68 @@ runtime; LocateFile searches CWD, IDE startup dir, IDE install
 dir).
 
 
+== IDE 1.0.24 / Compiler 3.3.10 ==
+
+Compiler
+  * `specialize-set' parameter modifier (feature/dynamic-params).
+    A new sugar form for parameters whose runtime value is known
+    to come from a closed set of compile-time constants:
+
+        procedure f(a: integer; k: integer specialize [1, 4, 8]);
+        begin
+          writeln(a + k * 100);
+        end;
+
+    The compiler lowers this to N specialised wrapper procedures
+    (one per set value) plus an inline dispatch stub:
+
+        procedure f__K_1(a: integer); inline;
+          const k = 1; begin writeln(a + k * 100); end;
+        procedure f__K_4(a: integer); inline; const k = 4; ...
+        procedure f__K_8(a: integer); inline; const k = 8; ...
+
+        procedure f(a: integer; k: integer); inline;
+        begin
+          case k of
+            1: f__K_1(a);
+            4: f__K_4(a);
+            8: f__K_8(a);
+          end;
+        end;
+
+    The const declarations in each wrapper let FPC's normal
+    constant-folding fold all uses of `k' to the wrapper's value.
+    The dispatch stub's `inline' directive plus its `case' form
+    let constant call sites (e.g. `f(10, 4)') collapse to a direct
+    call to the matching wrapper after stub inlining + tcasenode
+    constant folding. Variable call sites become a real case-table
+    jump.
+
+    Set syntax accepts literals, named consts, and ranges:
+    `[1, 4, 8]', `[0..3]', `[0, 2, 4..7]'. Cap of 64 specialisations
+    per proc. Parameter type must be ordinal.
+
+    v1 limitations:
+      - Methods (class/record/object) not supported.
+      - Mixing with non-specialize-set overloads in the same scope
+        is rejected.
+      - Recursive self-reference inside the body fails to resolve
+        (the user-name is renamed during body parse to free the
+        slot for the dispatch stub).
+      - Multi-parameter specialize-set on one proc is parsed but
+        not yet desugared.
+
+    Implementation: a pure preprocessor pass on the scanner token
+    stream. No AST surgery, no FPC generic machinery. Lives in
+    compiler/pspecset.pas with three hooks into the existing
+    ppreproc framework (pp_at_param_modifier, pp_before_proc_body,
+    pp_after_proc_body).
+
+  * `ppreproc.pas' framework gained `pp_before_proc_body' grammar
+    point and five token-emit primitives (`emit_keyword', `_punct',
+    `_ident', `_ident_as', `_intliteral') for synthesising token
+    streams that replay through the parser as if user-written.
+
 == IDE 1.0.23 / Compiler 3.3.9 ==
 
 Compiler

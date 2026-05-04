@@ -163,7 +163,9 @@ implementation
        optconstprop,
        optdeadstore,
        optloadmodifystore,
-       optutils
+       optutils,
+       { sugar features }
+       ppreproc
 {$if defined(arm) or defined(m68k)}
        ,cpuinfo
 {$endif defined(arm) or defined(m68k)}
@@ -2630,6 +2632,7 @@ implementation
          parentfpinitblock: tnode;
          old_parse_generic: boolean;
          recordtokens : boolean;
+         pp_body_ctx: tppreproc_proc_body_ctx;
       begin
          old_current_procinfo:=current_procinfo;
          old_block_type:=block_type;
@@ -2702,6 +2705,13 @@ implementation
              current_scanner.startrecordtokens(procdef.generictokenbuf);
            end;
 
+         { ppreproc dispatch point: pp_before_proc_body.
+           Scanner is at the body's `begin'. Sugar features that want
+           to capture or rewrite the body hook here. No-op when no
+           passes are registered. }
+         pp_body_ctx.procdef := procdef;
+         ppreproc_try_dispatch(pp_before_proc_body, @pp_body_ctx);
+
          { parse the code ... }
          code:=block(current_module.islibrary);
 
@@ -2729,6 +2739,14 @@ implementation
          { the procedure is now defined }
          procdef.forwarddef:=false;
          procdef.is_implemented:=true;
+
+         { ppreproc dispatch point: pp_after_proc_body.
+           Body is parsed; procdef fully populated. Sugar features
+           that need to generate companion declarations (e.g.
+           specialize-set's dispatch stub) hook here.
+           No-op when no passes are registered for this point. }
+         pp_body_ctx.procdef := procdef;
+         ppreproc_try_dispatch(pp_after_proc_body, @pp_body_ctx);
 
          if assigned(code) then
            begin
