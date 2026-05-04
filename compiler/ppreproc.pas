@@ -1,0 +1,446 @@
+{
+    Token-level preprocessor framework for FPC sugar features.
+
+    Lets a feature register a "pass" that fires at a known grammar
+    point in the parser (e.g. just after a parameter type was parsed),
+    captures some tokens from the user's source, transforms them, and
+    injects the result back into the scanner so the parser reads the
+    rewritten form as if the user had written it.
+
+    Built on top of the existing `startrecordtokens` / `startreplaytokens`
+    machinery in scanner.pas (originally added for cross-unit generic
+    body replay). This unit exposes that machinery as a stable API
+    for sugar features.
+
+    Design notes:
+      * Token-based, not string-based and not AST-based -- see
+        new_inline.txt / project notes for rationale.
+      * Per-grammar-point dispatch (option `(a)' from the design discussion).
+        The parser calls ppreproc_try_dispatch(<point>) at well-defined
+        spots; each registered pass declares which point(s) it fires at.
+      * Hybrid position model: each token carries the user-source
+        position it was derived from (default for error messages); each
+        injected buffer also carries an "origin trail" recording where
+        the expansion came from, so the error printer can append
+        "(in expansion of <feature> at <pos>)".
+      * Single-pass per trigger -- the framework never re-runs a pass
+        on its own emitted tokens. If two features want to compose,
+        they register at different grammar points or call each other
+        explicitly.
+      * Lazy capture: handlers should peek for their trigger token
+        BEFORE starting capture, so procs that don't use any sugar pay
+        only one comparison per grammar point.
+
+    Public surface:
+
+      ppreproc_register(pass)        -- register a pass.
+      ppreproc_try_dispatch(point)   -- parser calls this at a hook
+                                        point; returns TRUE if a pass
+                                        consumed the construct.
+
+      ppreproc_capture_begin         -- start recording scanner tokens
+                                        into a fresh buffer.
+      ppreproc_capture_end(b)        -- stop recording.
+
+      ppreproc_clone(src)            -- duplicate a buffer.
+      ppreproc_rename_ident(b, a, c) -- replace identifier text "a"
+                                        with "c" everywhere in b.
+      ppreproc_inject(b)             -- push b onto the scanner so the
+                                        parser reads it next.
+
+    Limitations (v1):
+      * Only ONE record buffer can be active at a time (scanner-level
+        constraint -- internalerror 200511173). Passes must not start
+        a capture while another is in progress; ppreproc_capture_begin
+        asserts this.
+      * Synthesising tokens that didn't come from real source (e.g.
+        a fabricated `case k of ...' body) requires writing tokens
+        directly via the scanner's tokenwrite primitives. That's done
+        by feature-specific code today; a generic "synth from string"
+        helper is a future addition.
+      * The error printer doesn't yet read the origin trail. Position
+        carrying is wired through the buffer; surfacing it in errors
+        is a follow-up.
+}
+unit ppreproc;
+
+{$i fpcdefs.inc}
+
+interface
+
+    uses
+      cclasses,
+      globtype,
+      tokens;
+
+    type
+      { Grammar points where the parser calls ppreproc_try_dispatch.
+        Add new points as features need them. Keep this list small --
+        each point is a constant overhead per parse. }
+      tppreproc_point = (
+        { Just after a parameter type was parsed in a parameter list.
+          Scanner state: type fully consumed; next token is whatever
+          follows the type (modifier keyword, `;', `)', `=' for default).
+          Used by feature/dynamic-params for `T specialize [set]'. }
+        pp_at_param_modifier
+      );
+
+      { Origin record describing where a synthetic buffer came from. }
+      tppreproc_origin = record
+        { Position in user source where the expansion was triggered.
+          E.g. for a `specialize [set]' modifier, this is the position
+          of the `specialize' keyword. }
+        triggered_at: tfileposinfo;
+        { Short feature tag for error messages: "specialize-set",
+          "memoized", etc. }
+        feature: ansistring;
+      end;
+
+      { A captured-or-synthetic token buffer, plus its origin trail.
+        Wraps tdynamicarray (the underlying scanner buffer) so we can
+        attach metadata without touching scanner internals. }
+      tppreproc_buf = class
+      public
+        { the actual token bytes; format matches scanner's recordtoken/
+          replaytoken serialisation }
+        data: tdynamicarray;
+        { where this buffer originated -- used for "expanded from"
+          annotations on error messages (wiring TBD) }
+        origin: tppreproc_origin;
+        constructor create(const aorigin: tppreproc_origin);
+        destructor destroy; override;
+      end;
+
+      { Handler signature for a registered pass. The handler is invoked
+        when the parser hits the grammar point and the trigger token
+        matches the next scanner token. Returns TRUE if the construct
+        was consumed (parser should not try further passes); FALSE to
+        leave scanner state unchanged. }
+      tppreproc_handler = function: boolean;
+
+      tppreproc_pass = record
+        { stable feature tag; appears in -vd diagnostics }
+        name: ansistring;
+        { which grammar point this pass fires at }
+        point: tppreproc_point;
+        { the token that triggers this pass. The framework checks
+          current_scanner.token against this BEFORE invoking the
+          handler, so handlers don't pay for failed peeks. Set to
+          NOTOKEN to match any token at this point (rare; usually
+          a feature is keyed on a specific keyword). }
+        trigger: ttoken;
+        { idtoken to also match against (since FPC keywords often
+          arrive as token=_ID, idtoken=<keyword>). Set to NOTOKEN
+          to ignore. If both trigger and trigger_id are NOTOKEN,
+          the pass fires unconditionally at this grammar point. }
+        trigger_id: ttoken;
+        { the handler procedure }
+        handler: tppreproc_handler;
+      end;
+
+    { ---- registration ---- }
+
+    procedure ppreproc_register(const pass: tppreproc_pass);
+    function  ppreproc_try_dispatch(point: tppreproc_point): boolean;
+
+    { Convenience: build a tppreproc_pass record without a verbose call
+      site. }
+    function ppreproc_make_pass(const aname: ansistring;
+                                apoint: tppreproc_point;
+                                atrigger, atrigger_id: ttoken;
+                                ahandler: tppreproc_handler): tppreproc_pass;
+
+    { ---- capture ---- }
+
+    function  ppreproc_capture_begin(const aorigin: tppreproc_origin): tppreproc_buf;
+    procedure ppreproc_capture_end(b: tppreproc_buf);
+
+    { ---- transform (read/write helpers; expanded in PP-3) ---- }
+
+    function  ppreproc_clone(src: tppreproc_buf): tppreproc_buf;
+
+    { ---- inject ---- }
+
+    procedure ppreproc_inject(b: tppreproc_buf);
+
+    { ---- introspection ---- }
+
+    { Number of currently registered passes. Useful for diagnostics. }
+    function  ppreproc_pass_count: longint;
+    { Iterate registered passes (caller-friendly). Returns @nil after
+      the last pass. }
+    function  ppreproc_pass_at(idx: longint): tppreproc_pass;
+
+
+implementation
+
+    uses
+      cutils,
+      verbose,
+      globals,
+      scanner,
+      pbase;
+
+    var
+      { Master list of registered passes. Built up during compiler
+        initialisation by feature units; not modified after first
+        compile. }
+      passes: array of tppreproc_pass;
+
+    { -------------- tppreproc_buf -------------- }
+
+    constructor tppreproc_buf.create(const aorigin: tppreproc_origin);
+      begin
+        inherited create;
+        data := tdynamicarray.create(64);
+        origin := aorigin;
+      end;
+
+    destructor tppreproc_buf.destroy;
+      begin
+        data.free;
+        inherited destroy;
+      end;
+
+    { -------------- registration -------------- }
+
+    function ppreproc_make_pass(const aname: ansistring;
+                                apoint: tppreproc_point;
+                                atrigger, atrigger_id: ttoken;
+                                ahandler: tppreproc_handler): tppreproc_pass;
+      begin
+        result.name       := aname;
+        result.point      := apoint;
+        result.trigger    := atrigger;
+        result.trigger_id := atrigger_id;
+        result.handler    := ahandler;
+      end;
+
+    procedure ppreproc_register(const pass: tppreproc_pass);
+      var
+        n: longint;
+      begin
+        n := length(passes);
+        setlength(passes, n+1);
+        passes[n] := pass;
+      end;
+
+    function ppreproc_pass_count: longint;
+      begin
+        result := length(passes);
+      end;
+
+    function ppreproc_pass_at(idx: longint): tppreproc_pass;
+      begin
+        result := passes[idx];
+      end;
+
+    { Invoked by the parser at a grammar hook point. Walks the
+      registered passes for this point; for each, checks whether
+      the current scanner token matches the pass's trigger; if so,
+      invokes the handler. Returns TRUE as soon as a handler reports
+      that it consumed the construct. }
+    function ppreproc_try_dispatch(point: tppreproc_point): boolean;
+      var
+        i: longint;
+        p: tppreproc_pass;
+        match: boolean;
+      begin
+        result := false;
+        for i := 0 to high(passes) do
+          begin
+            p := passes[i];
+            if p.point <> point then
+              continue;
+            { Check trigger. The parser caller doesn't peek; we do.
+              Both trigger and trigger_id default to NOTOKEN meaning
+              "don't filter on this field". A non-NOTOKEN value must
+              match the scanner state. }
+            match := true;
+            if p.trigger <> NOTOKEN then
+              if current_scanner.token <> p.trigger then
+                match := false;
+            if match and (p.trigger_id <> NOTOKEN) then
+              if current_scanner.idtoken <> p.trigger_id then
+                match := false;
+            if not match then
+              continue;
+            { Handler fires. It is responsible for consuming the
+              triggering token (and any tokens after) via the normal
+              consume() path, OR for capturing+injecting via the
+              framework helpers. }
+            if assigned(p.handler) then
+              if p.handler() then
+                begin
+                  result := true;
+                  exit;
+                end;
+          end;
+      end;
+
+    { -------------- capture -------------- }
+
+    function ppreproc_capture_begin(const aorigin: tppreproc_origin): tppreproc_buf;
+      begin
+        { Scanner constraint: only one record buffer at a time. Any
+          attempt to nest captures triggers internalerror 200511173 in
+          startrecordtokens. We assert here so the diagnostic blames
+          the right layer. }
+        if current_scanner.is_recording_tokens then
+          internalerror(2026050401);
+        result := tppreproc_buf.create(aorigin);
+        current_scanner.startrecordtokens(result.data);
+      end;
+
+    procedure ppreproc_capture_end(b: tppreproc_buf);
+      begin
+        if not assigned(b) then
+          internalerror(2026050402);
+        if not current_scanner.is_recording_tokens then
+          internalerror(2026050403);
+        current_scanner.stoprecordtokens;
+      end;
+
+    { -------------- transform (PP-3 expands) -------------- }
+
+    function ppreproc_clone(src: tppreproc_buf): tppreproc_buf;
+      var
+        savepos: longword;
+        b: byte;
+      begin
+        if not assigned(src) then
+          internalerror(2026050404);
+        result := tppreproc_buf.create(src.origin);
+        savepos := src.data.pos;
+        src.data.seek(0);
+        while src.data.pos < src.data.size do
+          begin
+            src.data.read(b, 1);
+            result.data.write(b, 1);
+          end;
+        src.data.seek(savepos);
+      end;
+
+    { -------------- inject -------------- }
+
+    procedure ppreproc_inject(b: tppreproc_buf);
+      begin
+        if not assigned(b) then
+          internalerror(2026050405);
+        { startreplaytokens saves current scanner state, installs the
+          buffer as replaytokenbuf, seeks to 0, and reads the first
+          token. When the buffer is exhausted the scanner pops back to
+          the user's source automatically. }
+        current_scanner.startreplaytokens(b.data, false);
+      end;
+
+
+    { -------------- smoke pass --------------
+
+      Temporary self-test. Registered unconditionally; fires when the
+      parser hits `specialize' after a parameter type (the same trigger
+      the dynamic-params feature will use).
+
+      Behaviour: consume `specialize [ ... ]', capture the bracket
+      contents into a buffer, discard the buffer, return true. Net
+      effect on user code: identical to commit 1's hand-rolled spike
+      (the modifier is consumed and the parameter is treated as
+      plain T).
+
+      Purpose: exercise the framework's capture API end-to-end so we
+      can verify (build green; smoke test compiles and runs; -vd shows
+      the diagnostic) before the dynamic-params feature pass replaces
+      this with the real desugar. Once that lands, this smoke pass is
+      removed from `initialization' below. }
+
+    function ppreproc_smoke_specialize_set: boolean;
+      var
+        buf: tppreproc_buf;
+        origin: tppreproc_origin;
+        depth: longint;
+      begin
+        result := false;
+        { Pre-check the trigger ourselves -- the dispatcher already
+          filtered, but defensive: confirm we're really sitting on
+          the `specialize' keyword. }
+        if not ((current_scanner.token=_ID) and
+                (current_scanner.idtoken=_SPECIALIZE)) then
+          exit;
+
+        { Set up an origin record for the buffer. The user-source
+          position is "wherever specialize is". }
+        origin.triggered_at := current_filepos;
+        origin.feature := 'ppreproc-smoke';
+
+        { Consume the `specialize' keyword and the opening bracket
+          BEFORE starting capture -- we don't need them in the buffer
+          for the smoke test. }
+        consume(_SPECIALIZE);
+        consume(_LECKKLAMMER);
+
+        { Begin capture. Everything the parser/scanner advances over
+          from now until capture_end lands in buf.data. }
+        buf := ppreproc_capture_begin(origin);
+
+        { Walk to the matching `]'. Track bracket depth so nested set
+          constructors like `[1, [2..4], 8]' (if we ever support them)
+          don't terminate early. }
+        depth := 1;
+        while depth > 0 do
+          begin
+            case current_scanner.token of
+              _LECKKLAMMER:
+                inc(depth);
+              _RECKKLAMMER:
+                begin
+                  dec(depth);
+                  if depth = 0 then
+                    break;
+                end;
+              _EOF:
+                begin
+                  { Unterminated set -- bail. The capture_end below
+                    is still required. }
+                  break;
+                end;
+              else
+                ; { other tokens are set elements; just advance }
+            end;
+            consume(current_scanner.token);
+          end;
+
+        { Stop capture BEFORE consuming the closing bracket so the
+          buffer ends with the last set element, not with `]'. }
+        ppreproc_capture_end(buf);
+
+        if current_scanner.token = _RECKKLAMMER then
+          consume(_RECKKLAMMER);
+
+        { Diagnostic so we can see the path fired. -vd visibility. }
+        Comment(V_Debug, 'ppreproc smoke: specialize-set captured ' +
+                         tostr(buf.data.size) + ' bytes from ' +
+                         origin.feature);
+
+        { Discard the buffer -- this is the no-op smoke. The real
+          dynamic-params pass will transform + inject. }
+        buf.free;
+
+        result := true;
+      end;
+
+
+initialization
+
+    { Register the smoke pass at unit init time. Removed once the
+      dynamic-params feature provides a real handler. }
+    ppreproc_register(
+      ppreproc_make_pass(
+        'ppreproc-smoke',           { name }
+        pp_at_param_modifier,       { grammar point }
+        _ID,                        { trigger token kind }
+        _SPECIALIZE,                { trigger idtoken (keyword) }
+        @ppreproc_smoke_specialize_set
+      )
+    );
+
+end.
