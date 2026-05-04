@@ -47,7 +47,9 @@ Unit Rax86int;
        {------------------ Assembler Operators  --------------------}
       AS_BYTE,AS_WORD,AS_DWORD,AS_QWORD,AS_TBYTE,AS_DQWORD,AS_OWORD,AS_XMMWORD,AS_YWORD,AS_YMMWORD,AS_ZWORD,AS_ZMMWORD,AS_NEAR,AS_FAR,
       AS_HIGH,AS_LOW,AS_OFFSET,AS_SIZEOF,AS_VMTOFFSET,AS_SEG,AS_TYPE,AS_PTR,AS_MOD,AS_SHL,AS_SHR,AS_NOT,
-      AS_AND,AS_OR,AS_XOR,AS_WRT,AS___GOTPCREL,AS_TARGET_DIRECTIVE,AS_RNSAE
+      AS_AND,AS_OR,AS_XOR,AS_WRT,AS___GOTPCREL,AS_TARGET_DIRECTIVE,AS_RNSAE,
+       {------------ Compile-time conditionals (%if family) --------}
+      AS_PCTIF,AS_PCTELSEIF,AS_PCTELSE,AS_PCTENDIF
 
       );
 
@@ -75,6 +77,16 @@ Unit Rax86int;
 
        { tx86intreader }
 
+       { %if family conditional state, one entry per nesting level }
+       tpctifstate = record
+         { a branch (the %if condition or some %elseif) has matched and emitted code }
+         taken : boolean;
+         { we are currently inside the matched branch -- emit instructions }
+         in_branch : boolean;
+         { %else has been seen, no further %elseif allowed }
+         seen_else : boolean;
+       end;
+
        tx86intreader = class(tasmreader)
          actasmpattern_origcase : string;
          actasmtoken : tasmtoken;
@@ -82,6 +94,8 @@ Unit Rax86int;
          prevasmtoken : tasmtoken;
          ActOpsize : topsize;
          inexpression : boolean;
+         { %if family conditional stack, top of stack at high(pctifstack) }
+         pctifstack : array of tpctifstate;
          constructor create;override;
          function is_asmopcode(const s: string):boolean;
          function is_asmoperator(const s: string):boolean;
@@ -109,6 +123,16 @@ Unit Rax86int;
 
          function is_targetdirective(const s: string): boolean;virtual;
          procedure HandleTargetDirective;virtual;
+
+         { %if family helpers }
+         function PctIfInSkip: boolean;
+         procedure PctIfPushState(taken_in:boolean);
+         procedure PctIfPopState;
+         function EvalPctIfCondition: boolean;
+         procedure HandlePctIf;
+         procedure HandlePctElseIf;
+         procedure HandlePctElse;
+         procedure HandlePctEndIf;
        end;
 
 
@@ -174,7 +198,8 @@ Unit Rax86int;
         '','','','','','','END',
         '','','','','','','','','','','','','','',
         '','','','sizeof','vmtoffset','','type','ptr','mod','shl','shr','not',
-        'and','or','xor','wrt','..gotpcrel','','{RN-SAE}'
+        'and','or','xor','wrt','..gotpcrel','','{RN-SAE}',
+        '%if','%elseif','%else','%endif'
       );
 
     constructor tx86intreader.create;
@@ -332,6 +357,31 @@ Unit Rax86int;
          begin
            firsttoken:=FALSE;
            len:=0;
+
+           { %if/%elseif/%else/%endif compile-time conditional directives }
+           if c = '%' then
+            begin
+              actasmpattern:='%';
+              c:=current_scanner.asmgetchar;
+              while c in ['A'..'Z','a'..'z'] do
+                begin
+                 actasmpattern:=actasmpattern+c;
+                 c:=current_scanner.asmgetchar;
+                end;
+              actasmpattern_origcase:=actasmpattern;
+              uppervar(actasmpattern);
+              if actasmpattern='%IF' then
+                begin actasmtoken:=AS_PCTIF; exit; end;
+              if actasmpattern='%ELSEIF' then
+                begin actasmtoken:=AS_PCTELSEIF; exit; end;
+              if actasmpattern='%ELSE' then
+                begin actasmtoken:=AS_PCTELSE; exit; end;
+              if actasmpattern='%ENDIF' then
+                begin actasmtoken:=AS_PCTENDIF; exit; end;
+              Message1(asmr_e_unknown_opcode,actasmpattern_origcase);
+              actasmtoken:=AS_NONE;
+              exit;
+            end;
 
            { directive check }
            if c = '.' then
@@ -3199,6 +3249,145 @@ Unit Rax86int;
       end;
 
 
+  function tx86intreader.PctIfInSkip: boolean;
+    begin
+      result:=(length(pctifstack)>0) and not pctifstack[high(pctifstack)].in_branch;
+    end;
+
+
+  procedure tx86intreader.PctIfPushState(taken_in:boolean);
+    var
+      n : longint;
+    begin
+      n:=length(pctifstack);
+      SetLength(pctifstack,n+1);
+      pctifstack[n].taken:=taken_in;
+      pctifstack[n].in_branch:=taken_in;
+      pctifstack[n].seen_else:=false;
+    end;
+
+
+  procedure tx86intreader.PctIfPopState;
+    begin
+      SetLength(pctifstack,length(pctifstack)-1);
+    end;
+
+
+  function tx86intreader.EvalPctIfCondition: boolean;
+    var
+      l : aint;
+    begin
+      { BuildConstExpression sets inexpression:=true and reads through to a
+        terminator (AS_SEPARATOR / AS_END / etc). Yields aint; non-zero == true. }
+      l:=BuildConstExpression;
+      result:=(l<>0);
+    end;
+
+
+  procedure tx86intreader.HandlePctIf;
+    var
+      cond : boolean;
+      parent_skipped : boolean;
+      n : longint;
+    begin
+      parent_skipped:=PctIfInSkip;
+      Consume(AS_PCTIF);
+      n:=length(pctifstack);
+      SetLength(pctifstack,n+1);
+      pctifstack[n].seen_else:=false;
+      if parent_skipped then
+        begin
+          { Nested inside a dead branch. Swallow the condition tokens without
+            evaluating. Mark taken:=true so any %elseif/%else inside cannot
+            re-enter; in_branch:=false keeps the whole subtree in skip mode. }
+          while not (actasmtoken in [AS_SEPARATOR,AS_END]) do
+            Consume(actasmtoken);
+          pctifstack[n].taken:=true;
+          pctifstack[n].in_branch:=false;
+        end
+      else
+        begin
+          cond:=EvalPctIfCondition;
+          pctifstack[n].taken:=cond;
+          pctifstack[n].in_branch:=cond;
+        end;
+    end;
+
+
+  procedure tx86intreader.HandlePctElseIf;
+    var
+      cond : boolean;
+      idx : longint;
+    begin
+      Consume(AS_PCTELSEIF);
+      idx:=high(pctifstack);
+      if idx<0 then
+        begin
+          Message(asmr_e_syntax_error);
+          { swallow rest of line so we don't cascade }
+          while not (actasmtoken in [AS_SEPARATOR,AS_END]) do
+            Consume(actasmtoken);
+          exit;
+        end;
+      if pctifstack[idx].seen_else then
+        begin
+          Message(asmr_e_syntax_error);
+          while not (actasmtoken in [AS_SEPARATOR,AS_END]) do
+            Consume(actasmtoken);
+          pctifstack[idx].in_branch:=false;
+          exit;
+        end;
+      { if a sibling already took the branch, never re-enter; just swallow cond }
+      if pctifstack[idx].taken then
+        begin
+          while not (actasmtoken in [AS_SEPARATOR,AS_END]) do
+            Consume(actasmtoken);
+          pctifstack[idx].in_branch:=false;
+          exit;
+        end;
+      { still hunting for a true arm }
+      cond:=EvalPctIfCondition;
+      pctifstack[idx].in_branch:=cond;
+      if cond then
+        pctifstack[idx].taken:=true;
+    end;
+
+
+  procedure tx86intreader.HandlePctElse;
+    var
+      idx : longint;
+    begin
+      Consume(AS_PCTELSE);
+      idx:=high(pctifstack);
+      if idx<0 then
+        begin
+          Message(asmr_e_syntax_error);
+          exit;
+        end;
+      if pctifstack[idx].seen_else then
+        begin
+          Message(asmr_e_syntax_error);
+          exit;
+        end;
+      pctifstack[idx].seen_else:=true;
+      pctifstack[idx].in_branch:=not pctifstack[idx].taken;
+      if pctifstack[idx].in_branch then
+        pctifstack[idx].taken:=true;
+    end;
+
+
+  procedure tx86intreader.HandlePctEndIf;
+    begin
+      Consume(AS_PCTENDIF);
+      if length(pctifstack)=0 then
+        begin
+          Message(asmr_e_syntax_error);
+          exit;
+        end;
+      PctIfPopState;
+    end;
+
+
   function tx86intreader.Assemble: tlinkedlist;
     Var
       hl : tasmlabel;
@@ -3218,6 +3407,7 @@ Unit Rax86int;
        end;
       }
       curlist:=TAsmList.Create;
+      SetLength(pctifstack,0);
       { we might need to know which parameters are passed in registers }
       if not parse_generic then
         current_procinfo.generate_parameter_info;
@@ -3225,7 +3415,35 @@ Unit Rax86int;
       gettoken;
       { main loop }
       repeat
+        { When inside a dead %if/%else branch, skip statements wholesale.
+          Only the %if family + AS_END remain meaningful for nesting/exit. }
+        if PctIfInSkip then
+          begin
+            case actasmtoken of
+              AS_PCTIF:     HandlePctIf;
+              AS_PCTELSEIF: HandlePctElseIf;
+              AS_PCTELSE:   HandlePctElse;
+              AS_PCTENDIF:  HandlePctEndIf;
+              AS_END:       break;
+              else
+                begin
+                  { Eat tokens until end-of-statement so half-parsed instructions
+                    don't fall through into the live-mode dispatch. }
+                  while not (actasmtoken in [AS_SEPARATOR,AS_END,
+                                              AS_PCTIF,AS_PCTELSEIF,AS_PCTELSE,AS_PCTENDIF]) do
+                    Consume(actasmtoken);
+                  if actasmtoken=AS_SEPARATOR then
+                    Consume(AS_SEPARATOR);
+                end;
+            end;
+            continue;
+          end;
         case actasmtoken of
+          AS_PCTIF:     begin HandlePctIf;     continue; end;
+          AS_PCTELSEIF: begin HandlePctElseIf; continue; end;
+          AS_PCTELSE:   begin HandlePctElse;   continue; end;
+          AS_PCTENDIF:  begin HandlePctEndIf;  continue; end;
+
           AS_LLABEL:
             Begin
               if CreateLocalLabel(actasmpattern,hl,true) then
@@ -3352,6 +3570,9 @@ Unit Rax86int;
             end;
         end; { end case }
       until false;
+      if length(pctifstack)>0 then
+        Message(asmr_e_syntax_error);
+      SetLength(pctifstack,0);
       { check that all referenced local labels are defined }
       checklocallabels;
       { Return the list in an asmnode }
