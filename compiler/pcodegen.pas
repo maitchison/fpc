@@ -1,20 +1,24 @@
 {
     Codegen-proc parameter modifier (`feature/codegen-proc').
 
-    Recognises `param: T codegen' inside the parameter list of a
-    procedure or function and lowers it to a wrapper-around-renamed-orig
-    pattern, building on top of ppreproc.pas's preprocessor framework.
+    Recognises `param: T codegen' (or `const param: T codegen' --
+    `const' is auto-applied if absent) inside the parameter list of a
+    procedure or function and lowers the proc into self-patching form:
 
-    User syntax:
+      * Cache slot (writable typed-const, local to the proc) for each
+        codegen param.
+      * Pascal-label decl per codegen param so the asm body's
+        `cg_<paramname>:' patch-site labels are addressable.
+      * Pascal compare-and-patch prologue at the start of the proc
+        body: if the new value differs from the cache, write it
+        through `@cg_<paramname>' and update the cache.
 
-      function shl_add(a, b: longint; const c: byte codegen;
-                                      const d: longint codegen): longint;
-      label cg_c, cg_d;
+    User syntax (everything else is preprocessor-emitted):
+
+      function shl_add(a, b: longint;
+                       c: byte    codegen;
+                       d: longint codegen): longint;
       begin
-          if cg_shl_add_addr_c = nil then begin
-              cg_shl_add_addr_c := @cg_c;
-              cg_shl_add_addr_d := @cg_d;
-          end;
           asm
               mov   eax, a
               db    $C1, $E0
@@ -27,61 +31,59 @@
           end;
       end;
 
-    What the preprocessor generates (in addition to renaming the
-    user's procsym to a hidden name):
+    Conceptual lowered form (the parser actually sees this -- the
+    decl section + `begin' + prologue come from a preprocessor inject
+    buffer, then control falls back to the user's asm block):
 
-      var
-          cg_shl_add_addr_c: pointer = nil;
-          cg_shl_add_addr_d: pointer = nil;
-          cg_shl_add_last_c: byte;
-          cg_shl_add_last_d: longint;
-
-      function shl_add(a, b: longint; const c: byte;
-                                      const d: longint): longint;
+      function shl_add(a, b: longint;
+                       const c: byte;
+                       const d: longint): longint;
+      label cg_c, cg_d;
+      const
+          cg_last_c: byte    = 0;
+          cg_last_d: longint = 0;
       begin
-          if cg_shl_add_addr_c = nil then
-              cg_orig_shl_add_1(0, 0, 0, 0);   (* trigger publish *)
-          if c <> cg_shl_add_last_c then begin
-              PByte(cg_shl_add_addr_c)^ := c;
-              cg_shl_add_last_c := c;
+          if c <> cg_last_c then begin
+              PByte(@cg_c)^ := c;
+              cg_last_c := c;
           end;
-          if d <> cg_shl_add_last_d then begin
-              PLongint(cg_shl_add_addr_d)^ := d;
-              cg_shl_add_last_d := d;
+          if d <> cg_last_d then begin
+              PLongint(@cg_d)^ := d;
+              cg_last_d := d;
           end;
-          result := cg_orig_shl_add_1(a, b, c, d);
+          asm
+              mov eax, a
+              ...
+          end;
       end;
 
-    Why this shape:
-
-      * Pascal labels (`label cg_c, cg_d;') are addressable from
-        Pascal context inside the declaring proc via `@cg_c'. We use
-        them to expose the patch-site bytes to the wrapper.
-      * The orig's first run publishes the addresses to global pointer
-        vars; the wrapper reads through those pointers thereafter.
-      * No `external name '...'' aliasing -- Pascal labels' mangled
-        symbol names are unpredictable, so we sidestep the linker
-        entirely.
-      * Cache vars (`cg_<f>_last_<p>') zero-init match the placeholder
-        bytes (`db 0' / `dd 0') zero-init, so the first compare is
-        consistent: if c=0, no patch needed; if c<>0, patch fires.
-        No `patched' flag required.
-
-    User responsibility (v1):
-      * Declare the proc's parameters as `const T codegen' (codegen
-        params are byval-immutable).
-      * Inside the proc, declare a Pascal `label' for each codegen
-        param (needs `(*$goto on*)' or `-Sg' on the build).
-      * The body's first statement must be the address-publish nil
-        check, exactly as shown above. Naming convention:
-            cg_<funcname>_addr_<paramname>
-        is used by the wrapper to reach the published address.
-      * The asm body uses the Pascal labels (`cg_<paramname>:') at the
-        patch sites, with `db 0' / `dw 0' / `dd 0' placeholders.
+    Properties:
+      * One proc, no wrapper. The orig itself does compare-and-patch.
+      * Local writable typed-consts give per-proc cache storage with
+        the lifetime we need (zero-init at unit load, mutable across
+        calls). Requires writable typed constants -- on by default in
+        FPC/Delphi modes; the user must enable it explicitly in
+        ObjFPC mode if they want to use codegen-proc there.
+      * `@cg_<paramname>' is a Pascal expression that resolves to the
+        address of the asm-block label inside the same proc -- proven
+        to work in FPC (see labprobe.pas notes in commit history).
+      * Cache zero-init matches the placeholder bytes' zero-init, so
+        the first compare is consistent: c=0 -> no patch needed
+        (already 0); c<>0 -> patch fires.
 
     Hooks (registered in initialization):
-      pp_at_param_modifier  -- parse + validate + sidecar + rename
-      pp_after_proc_body    -- emit cache vars + addr vars + wrapper
+      pp_at_param_modifier  -- validate, sidecar, auto-`const',
+                               consume `codegen'
+      pp_before_proc_body   -- splice label decls + cache consts +
+                               compare-and-patch prologue into the
+                               body via manual consume + emit + inject
+
+    User burden:
+      * Add `codegen' to the relevant parameters.
+      * Use `cg_<paramname>:' as the label name in the asm body at
+        each patch site, with `db 0' / `dw 0' / `dd 0' placeholder
+        of the param's width.
+      * Build with `-Sg' (label/goto support).
 
     Sidecar lifetime: process-global. Keyed by procdef pointer.
 }
@@ -107,8 +109,6 @@ interface
       tpcodegen_proc_entry = class
       public
         procdef: tprocdef;
-        orig_name: shortstring;
-        hidden_name: shortstring;
         params: array of tpcodegen_param;
         constructor create(apd: tprocdef);
       end;
@@ -201,175 +201,19 @@ implementation
         end;
       end;
 
-    function pcodegen_rename_procsym(pd: tprocdef): shortstring;
-      var
-        psym: tprocsym;
-        old_name: shortstring;
-        n: longint;
+    function label_name(const param_name: shortstring): shortstring;
       begin
-        result := '';
-        if not assigned(pd.procsym) then
-          exit;
-        psym := tprocsym(pd.procsym);
-        old_name := psym.realname;
-        n := 1;
-        repeat
-          result := 'cg_orig_' + old_name + '_' + tostr(n);
-          inc(n);
-        until psym.owner.find(upper(result)) = nil;
-        psym.ChangeOwnerAndName(psym.owner, upper(result));
-        psym.realname := result;
+        result := 'cg_' + param_name;
+      end;
+
+    function cache_name(const param_name: shortstring): shortstring;
+      begin
+        result := 'cg_last_' + param_name;
       end;
 
     { ============================================================
        pp_at_param_modifier handler
       ============================================================ }
-
-    { Naming convention -- the user's source must match these:
-        cg_<func>_addr_<param>     -- pointer var; orig publishes here
-                                      on first call, wrapper reads here
-        cg_<func>_last_<param>     -- cache var (compare pivot)
-      Lowered names match user-typed Pascal identifier rules. }
-
-    function addr_var_name(const orig_name, param_name: shortstring): shortstring;
-      begin
-        result := 'cg_' + orig_name + '_addr_' + param_name;
-      end;
-
-    function last_var_name(const orig_name, param_name: shortstring): shortstring;
-      begin
-        result := 'cg_' + orig_name + '_last_' + param_name;
-      end;
-
-    { ============================================================
-       pp_before_proc_body handler -- splice label decls + publish
-       prologue into the orig's body
-      ============================================================ }
-
-    { Manually consume tokens (with capture active) from the current
-      scanner position until we hit `begin'. Decl-section tokens land
-      in `buf' so they're replayed into the parser later as if the
-      user had written them first. Returns true on success.
-
-      Limitation: requires a `begin..end' body (rejects procs with
-      the `assembler' directive whose body starts with `asm'
-      directly). v1 acceptable. }
-    function consume_decls_until_begin(buf: tppreproc_buf): boolean;
-      var
-        t: ttoken;
-      begin
-        result := false;
-        while true do
-          begin
-            t := current_scanner.token;
-            if t = _BEGIN then
-              begin
-                result := true;
-                exit;
-              end;
-            if (t = _ASM) or (t = _EOF) then
-              exit;
-            consume(t);
-          end;
-      end;
-
-    function pcodegen_handle_before_body(ctx: pointer): boolean;
-      var
-        body_ctx: pppreproc_proc_body_ctx;
-        pd: tprocdef;
-        entry: tpcodegen_proc_entry;
-        buf: tppreproc_buf;
-        origin: tppreproc_origin;
-        i: longint;
-        first_addr: shortstring;
-      begin
-        result := false;
-        if not assigned(ctx) then
-          exit;
-        body_ctx := pppreproc_proc_body_ctx(ctx);
-        if not (body_ctx^.procdef is tprocdef) then
-          exit;
-        pd := tprocdef(body_ctx^.procdef);
-        entry := pcodegen_find(pd);
-        if entry = nil then
-          exit;
-        if length(entry.params) = 0 then
-          exit;
-        if current_scanner.is_recording_tokens then
-          begin
-            { Conflicts with FPC's generic-body capture; not supported. }
-            Comment(V_Error,
-              'codegen-proc: cannot combine with a generic procedure');
-            exit;
-          end;
-
-        origin.triggered_at := current_filepos;
-        origin.feature := 'codegen-proc-prologue';
-        buf := ppreproc_capture_begin(origin);
-
-        { Step 1: capture all local-decl tokens (var/const/type/label/
-          nested procs/etc.) into buf, stopping AT (not past) the
-          body's `begin'. }
-        if not consume_decls_until_begin(buf) then
-          begin
-            ppreproc_capture_end(buf);
-            buf.free;
-            Comment(V_Error,
-              'codegen-proc: requires `begin..end'' body (procs with ' +
-              'the `assembler'' directive aren''t supported in v1)');
-            exit;
-          end;
-
-        ppreproc_capture_end(buf);
-
-        { Step 2: append `label cg_<p1>, cg_<p2>, ...;' so the asm
-          block's `cg_<p>:' label uses are valid Pascal labels. }
-        ppreproc_emit_keyword(buf, _LABEL);
-        for i := 0 to high(entry.params) do
-          begin
-            if i > 0 then
-              ppreproc_emit_punct(buf, _COMMA);
-            ppreproc_emit_ident(buf, 'cg_' + entry.params[i].param_name);
-          end;
-        ppreproc_emit_punct(buf, _SEMICOLON);
-
-        { Step 3: emit our own `begin' (the user's `begin' is consumed
-          below) followed by the address-publish nil check. }
-        ppreproc_emit_keyword(buf, _BEGIN);
-
-        first_addr := addr_var_name(entry.orig_name, entry.params[0].param_name);
-        ppreproc_emit_keyword(buf, _IF);
-        ppreproc_emit_ident(buf, first_addr);
-        ppreproc_emit_punct(buf, _EQ);
-        ppreproc_emit_keyword(buf, _NIL);
-        ppreproc_emit_keyword(buf, _THEN);
-        ppreproc_emit_keyword(buf, _BEGIN);
-        for i := 0 to high(entry.params) do
-          begin
-            ppreproc_emit_ident(buf,
-              addr_var_name(entry.orig_name, entry.params[i].param_name));
-            ppreproc_emit_punct(buf, _ASSIGNMENT);
-            ppreproc_emit_punct(buf, _KLAMMERAFFE);
-            ppreproc_emit_ident(buf, 'cg_' + entry.params[i].param_name);
-            ppreproc_emit_punct(buf, _SEMICOLON);
-          end;
-        ppreproc_emit_keyword(buf, _END);
-        ppreproc_emit_punct(buf, _SEMICOLON);
-
-        { Step 4: consume the user's `begin' so the parser, when it
-          starts reading the buffer, sees OUR `begin' first, then
-          falls back to user source for the rest of the body. }
-        consume(_BEGIN);
-
-        Comment(V_Debug,
-          'codegen-proc: prologue spliced; buffer ' +
-          tostr(buf.data.size) + ' bytes (' +
-          tostr(length(entry.params)) + ' codegen params)');
-
-        ppreproc_inject(buf);
-
-        result := true;
-      end;
 
     function pcodegen_handle_param_modifier(ctx: pointer): boolean;
       var
@@ -438,36 +282,39 @@ implementation
 
         vs := tparavarsym(sc[0]);
 
-        if vs.varspez <> vs_const then
-          begin
-            Comment(V_Error,
-              'codegen-proc: parameter "' + vs.realname +
-              '" must be declared `const'' (codegen params are byval-immutable)');
-            consume(_CODEGEN);
-            result := true;
-            exit;
-          end;
-
-        if assigned(pd.procsym) and
-            (tprocsym(pd.procsym).ProcdefList.count > 0) then
-          begin
-            Comment(V_Error,
-              'codegen-proc: cannot overload "' + pd.procsym.realname +
-              '" with a non-codegen-proc version in the same scope');
-            consume(_CODEGEN);
-            result := true;
-            exit;
-          end;
+        { Auto-apply `const'. The user shouldn't need to write it; a
+          codegen param is byval-immutable by definition. Reject `var'
+          and `out' explicitly because those imply addressable-storage
+          semantics that conflict with patched-immediate use. }
+        case vs.varspez of
+          vs_const:
+            ;  { already const, nothing to do }
+          vs_value:
+            vs.varspez := vs_const;  { auto-promote }
+          vs_var, vs_out:
+            begin
+              Comment(V_Error,
+                'codegen-proc: parameter "' + vs.realname +
+                '" cannot be `var'' / `out'' (codegen params are ' +
+                'byval-immutable)');
+              consume(_CODEGEN);
+              result := true;
+              exit;
+            end;
+          else
+            begin
+              Comment(V_Error,
+                'codegen-proc: parameter "' + vs.realname +
+                '" has unsupported varspez');
+              consume(_CODEGEN);
+              result := true;
+              exit;
+            end;
+        end;
 
         consume(_CODEGEN);
 
         entry := pcodegen_get_or_create(pd);
-        if entry.orig_name = '' then
-          begin
-            if assigned(pd.procsym) then
-              entry.orig_name := pd.procsym.realname;
-            entry.hidden_name := pcodegen_rename_procsym(pd);
-          end;
         pe_idx := length(entry.params);
         setlength(entry.params, pe_idx + 1);
         entry.params[pe_idx].param_name := vs.realname;
@@ -476,238 +323,119 @@ implementation
 
         Comment(V_Debug,
           'codegen-proc: parameter "' + vs.realname +
-          '" sized ' + tostr(sz) + ' on ' + entry.orig_name +
-          ' -> ' + entry.hidden_name);
+          '" sized ' + tostr(sz));
 
         result := true;
       end;
 
     { ============================================================
-       Helpers for emitting the wrapper
+       pp_before_proc_body handler -- splice prologue into body
       ============================================================ }
 
-    type
-      tcg_emit_param = record
-        name: shortstring;
-        typename: shortstring;
-        spec: tvarspez;
-        is_codegen: boolean;
-      end;
-
-    function collect_visible_params(pd: tprocdef;
-                                    entry: tpcodegen_proc_entry;
-                                    out emit_paras: array of tcg_emit_param;
-                                    out count: longint): boolean;
+    { Manually consume tokens (with capture active) from the current
+      scanner position until we hit `begin'. Decl-section tokens land
+      in `buf' so they're replayed into the parser later as if the
+      user had written them first. Returns true if `begin' was reached. }
+    function consume_decls_until_begin(buf: tppreproc_buf): boolean;
       var
-        i, j: longint;
-        sym: tsym;
-        ps: tparavarsym;
+        t: ttoken;
       begin
-        result := true;
-        count := 0;
-        for i := 0 to pd.parast.SymList.count - 1 do
+        result := false;
+        while true do
           begin
-            sym := tsym(pd.parast.SymList[i]);
-            if sym.typ <> paravarsym then
-              continue;
-            ps := tparavarsym(sym);
-            if vo_is_hidden_para in ps.varoptions then
-              continue;
-            if not assigned(ps.vardef.typesym) then
+            t := current_scanner.token;
+            if t = _BEGIN then
               begin
-                Comment(V_Error,
-                  'codegen-proc: parameter "' + ps.realname +
-                  '" has anonymous type; codegen-proc requires named ' +
-                  'parameter types');
-                result := false;
+                result := true;
                 exit;
               end;
-            if count > high(emit_paras) then
-              begin
-                Comment(V_Error,
-                  'codegen-proc: too many visible parameters');
-                result := false;
-                exit;
-              end;
-            emit_paras[count].name := ps.realname;
-            emit_paras[count].typename := ps.vardef.typesym.realname;
-            emit_paras[count].spec := ps.varspez;
-            emit_paras[count].is_codegen := false;
-            for j := 0 to high(entry.params) do
-              if SameText(ps.realname, entry.params[j].param_name) then
-                begin
-                  emit_paras[count].is_codegen := true;
-                  break;
-                end;
-            inc(count);
+            if (t = _ASM) or (t = _EOF) then
+              exit;
+            consume(t);
           end;
       end;
 
-    procedure emit_param_spec(buf: tppreproc_buf; spec: tvarspez);
-      begin
-        case spec of
-          vs_var:      ppreproc_emit_keyword(buf, _VAR);
-          vs_const:    ppreproc_emit_keyword(buf, _CONST);
-          vs_out:      ppreproc_emit_keyword(buf, _OUT);
-          vs_constref: ppreproc_emit_ident(buf, 'constref');
-          else
-            ;
-        end;
-      end;
-
-    procedure emit_addr_var(buf: tppreproc_buf;
-                            const orig_name: shortstring;
-                            const p: tpcodegen_param);
-      var
-        an: shortstring;
-      begin
-        an := addr_var_name(orig_name, p.param_name);
-        ppreproc_emit_ident(buf, an);
-        ppreproc_emit_punct(buf, _COLON);
-        ppreproc_emit_ident(buf, 'pointer');
-        ppreproc_emit_punct(buf, _SEMICOLON);
-      end;
-
-    procedure emit_last_var(buf: tppreproc_buf;
-                            const orig_name: shortstring;
-                            const p: tpcodegen_param);
-      var
-        ln, tn: shortstring;
-      begin
-        ln := last_var_name(orig_name, p.param_name);
-        tn := pcodegen_size_typename(p.type_size);
-        ppreproc_emit_ident(buf, ln);
-        ppreproc_emit_punct(buf, _COLON);
-        ppreproc_emit_ident(buf, tn);
-        ppreproc_emit_punct(buf, _SEMICOLON);
-      end;
-
-    { Emit the trigger-publish call that runs once on first wrapper
-      call. Uses zero literals for every param of the orig (the orig's
-      body is expected to publish addresses unconditionally on its
-      first call -- the user's nil-check ensures we only run it once). }
-    procedure emit_publish_trigger(buf: tppreproc_buf;
-                                   pd: tprocdef;
-                                   entry: tpcodegen_proc_entry;
-                                   const emit_paras: array of tcg_emit_param;
-                                   paras_count: longint;
-                                   is_function: boolean);
+    { Emit `label cg_<p1>, cg_<p2>, ...;' so the asm body's
+      `cg_<paramname>:' uses are valid Pascal labels. }
+    procedure emit_label_decls(buf: tppreproc_buf;
+                               entry: tpcodegen_proc_entry);
       var
         i: longint;
-        first_addr: shortstring;
       begin
-        if length(entry.params) = 0 then
-          exit;
-        first_addr := addr_var_name(entry.orig_name, entry.params[0].param_name);
-
-        ppreproc_emit_keyword(buf, _IF);
-        ppreproc_emit_ident(buf, first_addr);
-        ppreproc_emit_punct(buf, _EQ);
-        ppreproc_emit_keyword(buf, _NIL);
-        ppreproc_emit_keyword(buf, _THEN);
-
-        { Emit `<funcname> := <hidden>(0,...)' for functions, or
-          a bare call for procedures. Function-name-assignment works
-          in all FPC modes -- avoiding `result' sidesteps modeswitch
-          dependency. }
-        if is_function then
-          begin
-            ppreproc_emit_ident(buf, entry.orig_name);
-            ppreproc_emit_punct(buf, _ASSIGNMENT);
-          end;
-        ppreproc_emit_ident(buf, entry.hidden_name);
-        ppreproc_emit_punct(buf, _LKLAMMER);
-        for i := 0 to paras_count - 1 do
+        ppreproc_emit_keyword(buf, _LABEL);
+        for i := 0 to high(entry.params) do
           begin
             if i > 0 then
               ppreproc_emit_punct(buf, _COMMA);
-            ppreproc_emit_intliteral(buf, 0);
+            ppreproc_emit_ident(buf, label_name(entry.params[i].param_name));
           end;
-        ppreproc_emit_punct(buf, _RKLAMMER);
         ppreproc_emit_punct(buf, _SEMICOLON);
       end;
 
-    procedure emit_wrapper(buf: tppreproc_buf;
-                           pd: tprocdef;
-                           entry: tpcodegen_proc_entry;
-                           const emit_paras: array of tcg_emit_param;
-                           paras_count: longint);
+    { Emit `const cg_last_<p1>: <type> = 0; cg_last_<p2>: ...;' --
+      writable typed-constants give per-proc storage with zero-init
+      that survives across calls. Matches the patch-byte placeholder
+      zero-init so the first compare is consistent. }
+    procedure emit_cache_consts(buf: tppreproc_buf;
+                                entry: tpcodegen_proc_entry);
       var
-        i, j: longint;
-        is_function: boolean;
-        rettype_name: shortstring;
+        i: longint;
         ps: tpcodegen_param;
-        ln, an, ptn: shortstring;
       begin
-        is_function := false;
-        rettype_name := '';
-        if assigned(pd.returndef) and
-           (not is_void(pd.returndef)) and
-           assigned(pd.returndef.typesym) then
+        ppreproc_emit_keyword(buf, _CONST);
+        for i := 0 to high(entry.params) do
           begin
-            is_function := true;
-            rettype_name := pd.returndef.typesym.realname;
-          end;
-
-        if is_function then
-          ppreproc_emit_keyword(buf, _FUNCTION)
-        else
-          ppreproc_emit_keyword(buf, _PROCEDURE);
-        ppreproc_emit_ident(buf, entry.orig_name);
-
-        ppreproc_emit_punct(buf, _LKLAMMER);
-        for i := 0 to paras_count - 1 do
-          begin
-            if i > 0 then
-              ppreproc_emit_punct(buf, _SEMICOLON);
-            emit_param_spec(buf, emit_paras[i].spec);
-            ppreproc_emit_ident(buf, emit_paras[i].name);
+            ps := entry.params[i];
+            ppreproc_emit_ident(buf, cache_name(ps.param_name));
             ppreproc_emit_punct(buf, _COLON);
-            ppreproc_emit_ident(buf, emit_paras[i].typename);
+            ppreproc_emit_ident(buf, pcodegen_size_typename(ps.type_size));
+            ppreproc_emit_punct(buf, _EQ);
+            ppreproc_emit_intliteral(buf, 0);
+            ppreproc_emit_punct(buf, _SEMICOLON);
           end;
-        ppreproc_emit_punct(buf, _RKLAMMER);
+      end;
 
-        if is_function then
+    { Emit, for each codegen param `p' of width N:
+        if p <> cg_last_p then begin
+          P<sz>(@cg_p)^ := p;
+          cg_last_p := p;
+        end;
+      Pre: `begin' has been emitted on `buf'; this is the body's
+      first compound-statement region. }
+    procedure emit_compare_patch_block(buf: tppreproc_buf;
+                                       entry: tpcodegen_proc_entry);
+      var
+        i: longint;
+        ps: tpcodegen_param;
+        ln, cn, ptn: shortstring;
+      begin
+        for i := 0 to high(entry.params) do
           begin
-            ppreproc_emit_punct(buf, _COLON);
-            ppreproc_emit_ident(buf, rettype_name);
-          end;
-        ppreproc_emit_punct(buf, _SEMICOLON);
-
-        ppreproc_emit_keyword(buf, _BEGIN);
-
-        emit_publish_trigger(buf, pd, entry, emit_paras, paras_count, is_function);
-
-        for j := 0 to high(entry.params) do
-          begin
-            ps := entry.params[j];
-            ln := last_var_name(entry.orig_name, ps.param_name);
-            an := addr_var_name(entry.orig_name, ps.param_name);
+            ps := entry.params[i];
+            ln := label_name(ps.param_name);
+            cn := cache_name(ps.param_name);
             ptn := pcodegen_size_ptype(ps.type_size);
 
-            { if <p> <> <last> then begin
-                P<sz>(<addr>)^ := <p>;
-                <last> := <p>;
-              end; }
             ppreproc_emit_keyword(buf, _IF);
             ppreproc_emit_ident(buf, ps.param_name);
             ppreproc_emit_punct(buf, _NE);
-            ppreproc_emit_ident(buf, ln);
+            ppreproc_emit_ident(buf, cn);
             ppreproc_emit_keyword(buf, _THEN);
             ppreproc_emit_keyword(buf, _BEGIN);
 
-            { P<sz>(<addr>)^ := <p>; }
+            { P<sz>(@<label>)^ := p; }
             ppreproc_emit_ident(buf, ptn);
             ppreproc_emit_punct(buf, _LKLAMMER);
-            ppreproc_emit_ident(buf, an);
+            ppreproc_emit_punct(buf, _KLAMMERAFFE);
+            ppreproc_emit_ident(buf, ln);
             ppreproc_emit_punct(buf, _RKLAMMER);
             ppreproc_emit_punct(buf, _CARET);
             ppreproc_emit_punct(buf, _ASSIGNMENT);
             ppreproc_emit_ident(buf, ps.param_name);
             ppreproc_emit_punct(buf, _SEMICOLON);
 
-            { <last> := <p>; }
-            ppreproc_emit_ident(buf, ln);
+            { cg_last_p := p; }
+            ppreproc_emit_ident(buf, cn);
             ppreproc_emit_punct(buf, _ASSIGNMENT);
             ppreproc_emit_ident(buf, ps.param_name);
             ppreproc_emit_punct(buf, _SEMICOLON);
@@ -715,44 +443,16 @@ implementation
             ppreproc_emit_keyword(buf, _END);
             ppreproc_emit_punct(buf, _SEMICOLON);
           end;
-
-        if is_function then
-          begin
-            ppreproc_emit_ident(buf, entry.orig_name);
-            ppreproc_emit_punct(buf, _ASSIGNMENT);
-          end;
-        ppreproc_emit_ident(buf, entry.hidden_name);
-        ppreproc_emit_punct(buf, _LKLAMMER);
-        for i := 0 to paras_count - 1 do
-          begin
-            if i > 0 then
-              ppreproc_emit_punct(buf, _COMMA);
-            ppreproc_emit_ident(buf, emit_paras[i].name);
-          end;
-        ppreproc_emit_punct(buf, _RKLAMMER);
-        ppreproc_emit_punct(buf, _SEMICOLON);
-
-        ppreproc_emit_keyword(buf, _END);
-        ppreproc_emit_punct(buf, _SEMICOLON);
       end;
 
-    { ============================================================
-       pp_after_proc_body handler -- emit + inject
-      ============================================================ }
-
-    function pcodegen_handle_after_body(ctx: pointer): boolean;
+    function pcodegen_handle_before_body(ctx: pointer): boolean;
       var
         body_ctx: pppreproc_proc_body_ctx;
         pd: tprocdef;
         entry: tpcodegen_proc_entry;
-        emit_paras: array[0..63] of tcg_emit_param;
-        paras_count: longint;
-        inject_buf: tppreproc_buf;
-        inject_origin: tppreproc_origin;
-        i: longint;
+        buf: tppreproc_buf;
+        origin: tppreproc_origin;
       begin
-        paras_count := 0;
-        fillchar(emit_paras, sizeof(emit_paras), 0);
         result := false;
         if not assigned(ctx) then
           exit;
@@ -765,34 +465,48 @@ implementation
           exit;
         if length(entry.params) = 0 then
           exit;
+        if current_scanner.is_recording_tokens then
+          begin
+            Comment(V_Error,
+              'codegen-proc: cannot combine with a generic procedure');
+            exit;
+          end;
 
-        if not collect_visible_params(pd, entry, emit_paras, paras_count) then
-          exit;
+        origin.triggered_at := current_filepos;
+        origin.feature := 'codegen-proc-prologue';
+        buf := ppreproc_capture_begin(origin);
 
-        inject_origin.triggered_at := current_filepos;
-        inject_origin.feature := 'codegen-proc-emit';
-        inject_buf := tppreproc_buf.create(inject_origin);
+        { Capture user's local-decl section into buf, stopping AT
+          (not past) `begin'. }
+        if not consume_decls_until_begin(buf) then
+          begin
+            ppreproc_capture_end(buf);
+            buf.free;
+            Comment(V_Error,
+              'codegen-proc: requires `begin..end'' body (procs with ' +
+              'the `assembler'' directive aren''t supported in v1)');
+            exit;
+          end;
 
-        ppreproc_emit_punct(inject_buf, _SEMICOLON);
+        ppreproc_capture_end(buf);
 
-        { Cache vars only -- the user is responsible for declaring
-          the `cg_<f>_addr_<p>: pointer = nil;' vars BEFORE the orig
-          (since the orig's body refers to them; forward references
-          aren't possible across decl boundaries). }
-        ppreproc_emit_keyword(inject_buf, _VAR);
-        for i := 0 to high(entry.params) do
-          emit_last_var(inject_buf, entry.orig_name, entry.params[i]);
+        { Append synthesised local decls + new `begin' + prologue. }
+        emit_label_decls(buf, entry);
+        emit_cache_consts(buf, entry);
 
-        emit_wrapper(inject_buf, pd, entry, emit_paras, paras_count);
+        ppreproc_emit_keyword(buf, _BEGIN);
+        emit_compare_patch_block(buf, entry);
 
-        if current_scanner.token = _SEMICOLON then
-          consume(_SEMICOLON);
+        { Consume the user's `begin' so once buf drains, the parser
+          continues from user source at "first statement of body". }
+        consume(_BEGIN);
 
         Comment(V_Debug,
-          'codegen-proc: inject buffer ' + tostr(inject_buf.data.size) +
-          ' bytes (' + tostr(length(entry.params)) + ' codegen params)');
+          'codegen-proc: prologue spliced; buffer ' +
+          tostr(buf.data.size) + ' bytes (' +
+          tostr(length(entry.params)) + ' codegen params)');
 
-        ppreproc_inject(inject_buf);
+        ppreproc_inject(buf);
 
         result := true;
       end;
@@ -815,15 +529,6 @@ initialization
         NOTOKEN,
         NOTOKEN,
         @pcodegen_handle_before_body
-      )
-    );
-    ppreproc_register(
-      ppreproc_make_pass(
-        'codegen-proc-after-body',
-        pp_after_proc_body,
-        NOTOKEN,
-        NOTOKEN,
-        @pcodegen_handle_after_body
       )
     );
 
