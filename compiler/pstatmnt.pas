@@ -1078,32 +1078,27 @@ implementation
         asmreader : tbaseasmreader;
         entrypos : tfileposinfo;
         hl : TAsmList;
+        in_specset_body : boolean;
       begin
          Inside_asm_statement:=true;
          asmstat:=nil;
          hl:=nil;
 
-         { specialize-set: pspecset's pp_before_proc_body installs a
-           token-level scanner.recordtokenbuf over the body, but the asm
-           reader reads source characters directly via asmgetchar, so the
-           asm body's chars never enter the captured token stream. When
-           SS-B replays the buffer for each per-value wrapper, the asm
-           block re-parse runs against stale source chars, the parser
-           never leaves asm mode, and subsequent decls fail with cryptic
-           "Unrecognized opcode" errors. Emit a clear leading diagnostic
-           so the user knows the cause; the cascade that follows is
-           harmless noise but not yet suppressed. The proper fix needs
-           whole-body source-text capture (or asm-block source-range
-           capture) in ppreproc -- separate piece of work. }
-         if assigned(current_procinfo) and
-            assigned(current_procinfo.procdef) and
-            (pspecset_find(current_procinfo.procdef) <> nil) then
-           Comment(V_Error,
-             'specialize-set: asm blocks inside a specialize-set proc ' +
-             'body are not yet supported (body-capture in pspecset is ' +
-             'token-only, asm chars bypass it). Lift the asm into a ' +
-             'non-specialised helper procedure that the wrapper calls, ' +
-             'or wait for source-text capture support.');
+         { specialize-set: when this asm block sits inside a body that
+           ppreproc is currently capturing for SS-B (the user's proc has
+           a pspecset sidecar AND a recordtokenbuf is active), turn on
+           the asm-source side-channel BEFORE the asm reader runs. The
+           reader's char reads via asmgetchar will be appended to the
+           scanner's asm_capture_buf, and end_specset_asm_capture below
+           writes them out as an ST_ASM_SOURCE marker -- which each
+           per-value wrapper replays through substitutemacro to get a
+           fresh asm parse against the same source text. }
+         in_specset_body := assigned(current_procinfo) and
+                            assigned(current_procinfo.procdef) and
+                            (pspecset_find(current_procinfo.procdef) <> nil) and
+                            current_scanner.is_recording_tokens;
+         if in_specset_body then
+           current_scanner.begin_specset_asm_capture;
 
          { apply all switch changes as the assembler readers doesn't do so }
          flushpendingswitchesstate;
@@ -1126,6 +1121,22 @@ implementation
            end
          else
            Message(parser_f_assembler_reader_not_supported);
+
+         { Flush the asm-source side-channel: write ST_ASM_SOURCE +
+           captured bytes to recordtokenbuf so SS-B's per-value wrappers
+           can replay them. }
+         if in_specset_body then
+           current_scanner.end_specset_asm_capture;
+
+         { Wrapper-replay clean-up: an ST_ASM_SOURCE marker that
+           preceded this _ASM token pushed a synthetic input file via
+           substitutemacro before this statement ran. AS_END causes
+           asmreader to break BEFORE the buffer is fully drained (only
+           the lookahead char past `end' was consumed), so the synthetic
+           stays on the input stack. Force-pop it here so subsequent
+           parsing reads from the proper input again. No-op when the
+           top-of-stack input isn't our specset-asm synthetic. }
+         current_scanner.pop_specset_asm_source_if_active;
 
          { Mark procedure that it has assembler blocks }
          include(current_procinfo.flags,pi_has_assembler_block);
