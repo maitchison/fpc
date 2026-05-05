@@ -170,7 +170,17 @@ Unit Rax86int;
        { feature/codegen-proc -- recognise codegen-param idents in
          immediate operand position; auto-emit `cg_<p>:' label after
          the instruction so the preprocessor's prologue can patch it }
-       pcodegen
+       pcodegen,
+       { specialize-set: pspecset_find lets the asm %if evaluator
+         recognise a paravarsym belonging to a specialize-set proc
+         during the original-body capture phase (before the wrapper
+         const-shadow exists) and treat it as a placeholder 0 so the
+         capture proceeds without erroring. The captured tokens are
+         re-evaluated when each per-value wrapper is parsed -- by
+         that point the wrapper-local constsym is in scope and the
+         constsym branch in BuildConstSymbolExpression picks up its
+         value, so %if folds to the right branch per specialisation. }
+       pspecset
        ;
 
     type
@@ -1636,10 +1646,38 @@ Unit Rax86int;
                                hs:=tstaticvarsym(sym).mangledname;
                                def:=tstaticvarsym(sym).vardef;
                              end;
+                           constsym :
+                             begin
+                               { Untyped ordinal const (boolean/char/enum/integer)
+                                 -- inline its value as an integer literal in the
+                                 expression. Lets `%if x' work where x is the
+                                 wrapper-local const-shadow that pspecset emits
+                                 (`const x = true|false|...;') for each value of
+                                 a specialize-set parameter. }
+                               if tconstsym(sym).consttyp=constord then
+                                 begin
+                                   str(tconstsym(sym).value.valueord.svalue,tempstr);
+                                   expr:=expr+tempstr;
+                                 end
+                               else
+                                 Message(asmr_e_wrong_sym_type);
+                             end;
                            localvarsym,
                            paravarsym :
                              begin
-                               Message(asmr_e_no_local_or_para_allowed);
+                               { Specialize-set capture phase: when the proc has
+                                 a specialize-set sidecar AND the ident matches
+                                 a registered specset param, the value is not
+                                 yet known (it will become a wrapper-local const
+                                 when the body is replayed per specialisation).
+                                 Emit a placeholder 0 so capture proceeds; %if
+                                 will be re-evaluated correctly during each
+                                 wrapper's body parse where x is a real const. }
+                               if (sym.typ=paravarsym) and
+                                  pspecset_is_capture_para(current_procinfo, sym.realname) then
+                                 expr:=expr+'0'
+                               else
+                                 Message(asmr_e_no_local_or_para_allowed);
                              end;
                            procsym :
                              begin

@@ -58,6 +58,10 @@ implementation
        procinfo,cgbase,
        { assembler reader }
        rabase,
+       { specialize-set: detect asm blocks inside a specset proc body
+         (which the token-only body-capture in pspecset doesn't yet
+         survive -- see notes in _asm_statement) }
+       pspecset,
        { scanner }
        switches;
 
@@ -1078,6 +1082,28 @@ implementation
          Inside_asm_statement:=true;
          asmstat:=nil;
          hl:=nil;
+
+         { specialize-set: pspecset's pp_before_proc_body installs a
+           token-level scanner.recordtokenbuf over the body, but the asm
+           reader reads source characters directly via asmgetchar, so the
+           asm body's chars never enter the captured token stream. When
+           SS-B replays the buffer for each per-value wrapper, the asm
+           block re-parse runs against stale source chars, the parser
+           never leaves asm mode, and subsequent decls fail with cryptic
+           "Unrecognized opcode" errors. Emit a clear leading diagnostic
+           so the user knows the cause; the cascade that follows is
+           harmless noise but not yet suppressed. The proper fix needs
+           whole-body source-text capture (or asm-block source-range
+           capture) in ppreproc -- separate piece of work. }
+         if assigned(current_procinfo) and
+            assigned(current_procinfo.procdef) and
+            (pspecset_find(current_procinfo.procdef) <> nil) then
+           Comment(V_Error,
+             'specialize-set: asm blocks inside a specialize-set proc ' +
+             'body are not yet supported (body-capture in pspecset is ' +
+             'token-only, asm chars bypass it). Lift the asm into a ' +
+             'non-specialised helper procedure that the wrapper calls, ' +
+             'or wait for source-text capture support.');
 
          { apply all switch changes as the assembler readers doesn't do so }
          flushpendingswitchesstate;
