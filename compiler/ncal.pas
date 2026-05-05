@@ -6016,7 +6016,18 @@ implementation
           rename is a no-op when the body has no ait_label, so it costs
           essentially nothing for the common 0-label case. }
         if pio_inline_asm in tprocdef(procdefinition).implprocoptions then
-          inline_clone_asm_labels(body);
+          begin
+            inline_clone_asm_labels(body);
+            { Rewrite each `mov ebx, slot`-style symbol-by-name read of a
+              register-cc parameter into a direct register read of the param's
+              calleeside home register. The v2(c) loader below puts the value
+              there before the body runs, so the splice ends up with no
+              top_local survivors -- codegen never sees a parameter symbol it
+              would otherwise lower to a stack-frame ref against the caller's
+              EBP. See inline_asm_top_local_is_register_param + the gate clause
+              in compiler/psub.pas:asmnode_inline_safe for the predicate. }
+            inline_resolve_asm_paralocals(body);
+          end;
 
         { v2(c): for each register-cc para, ensure the asm body sees the
           argument value in its ABI register at body-entry. The asm body
