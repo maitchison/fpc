@@ -76,6 +76,12 @@ type
       inline-provider's implementation runs before consumers' impls
       that may want to inline its bodies. }
     function scc_intf_inbound_count(m: tmodule): integer;
+    { Count po_inline-marked procdefs in m's interface global symtable.
+      Used by processqueue as a tiebreaker after scc_intf_inbound_count:
+      among SCC members tied on inbound demand, prefer the one exporting
+      more inline bodies, since advancing its impl populates inlininginfo
+      for all of them at once. }
+    function scc_inline_export_count(m: tmodule): integer;
     function is_uses_waiting(m: tmodule; uu: tused_unit): boolean;
     function check_do_reload_cycle(scc_root: tmodule): boolean;
     function check_crc_mismatches(scc_root: tmodule): boolean;
@@ -115,7 +121,7 @@ implementation
 
 uses
   verbose, fppu, sysutils,
-  scanner, parser, pmodules, symbase;
+  scanner, parser, pmodules, symbase, symtype, symconst, symdef;
 
 procedure InitTaskHandler;
 begin
@@ -614,6 +620,42 @@ begin
 end;
 
 
+function ttask_handler.scc_inline_export_count(m: tmodule): integer;
+{ Walks m's interface globalsymtable (and any nested record/object/class
+  symtables) counting procdefs marked po_inline. Tiebreaker for the SCC
+  picker: among modules tied on inbound demand, prefer the one exporting
+  more inline bodies. Recursing into class symtables matters because the
+  common SCC-defer case is a class method (e.g. tMemoryStream._readWord),
+  not a top-level inline proc. Cheap; called only on cancontinue-eligible
+  candidates. }
+  procedure walk(st: tsymtable);
+  var
+    i: longint;
+    def: tdef;
+  begin
+    if st=nil then
+      exit;
+    for i:=0 to st.DefList.Count-1 do
+      begin
+        def:=tdef(st.DefList[i]);
+        { case-label name clash with the type identifiers tprocdef etc.:
+          enum constants procdef/recorddef/objectdef get shadowed by
+          their same-named types in this unit's scope. Use if/else. }
+        if def.typ=procdef then
+          begin
+            if po_inline in tprocdef(def).procoptions then
+              inc(result);
+          end
+        else if (def.typ=recorddef) or (def.typ=objectdef) then
+          walk(tabstractrecorddef(def).symtable);
+      end;
+  end;
+begin
+  result:=0;
+  walk(m.globalsymtable);
+end;
+
+
 function ttask_handler.is_uses_waiting(m: tmodule; uu: tused_unit): boolean;
 var
   um: tmodule;
@@ -1091,17 +1133,28 @@ begin
         {$ENDIF}
         if (m.state<ms_processed) and cancontinue(m,firstwaiting) then
           begin
-            { prefer do_reload, then a unit whose interface is imported by
-              other unfinished SCC members (inline-providers ahead of
-              consumers, so inlininginfo is populated before consumer impls
-              are parsed -- avoids the "body not stored" miss-inline),
-              then pas, last ppu }
+            { Picker priority (highest first):
+                1. do_reload      — must come before regular work
+                2. inbound count  — units imported by other unfinished SCC
+                                    members (inline-providers ahead of
+                                    consumers, so inlininginfo is populated
+                                    before consumer impls are parsed --
+                                    avoids the "body not stored" miss-inline)
+                3. inline exports — among modules tied on inbound demand,
+                                    prefer the one declaring more po_inline
+                                    procs in its interface (advancing its
+                                    impl earliest unlocks the most bodies)
+                4. pas before ppu — re-parsing source last }
             if (best=nil)
                 or m.do_reload
                 or (not best.do_reload and
                     (scc_intf_inbound_count(m) > scc_intf_inbound_count(best)))
                 or (not best.do_reload
                     and (scc_intf_inbound_count(m) = scc_intf_inbound_count(best))
+                    and (scc_inline_export_count(m) > scc_inline_export_count(best)))
+                or (not best.do_reload
+                    and (scc_intf_inbound_count(m) = scc_intf_inbound_count(best))
+                    and (scc_inline_export_count(m) = scc_inline_export_count(best))
                     and best.fromppu and not m.fromppu)
             then
               best:=m;
