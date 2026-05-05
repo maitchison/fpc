@@ -100,10 +100,23 @@ interface
       ppreproc;
 
     type
+      tpcodegen_kind = (
+        { Ordinal byte/word/longint param. Used as the immediate
+          operand of an instruction (`shl reg, p', `imul r,r,p',
+          `add reg, p'). Patched at the imm bytes embedded in the
+          encoded instruction. }
+        cgk_imm,
+        { Pointer param. Used as a memory-reference base address
+          (`mov eax, p[ebx*2]'). Patched at the disp32 bytes of the
+          encoded instruction. Always 4-byte displacement on i386. }
+        cgk_ptr
+      );
+
       tpcodegen_param = record
         param_name: shortstring;
         param_def: tdef;
         type_size: longint;       { 1, 2, or 4 }
+        kind: tpcodegen_kind;
       end;
 
       tpcodegen_proc_entry = class
@@ -122,6 +135,7 @@ interface
       (the same name the preprocessor injects via `label cg_<p>;'). }
     function pcodegen_match_param(pd: tprocdef;
                                   const ident: string;
+                                  out kind: tpcodegen_kind;
                                   out type_size: longint;
                                   out label_name: shortstring): boolean;
 
@@ -167,6 +181,7 @@ implementation
 
     function pcodegen_match_param(pd: tprocdef;
                                   const ident: string;
+                                  out kind: tpcodegen_kind;
                                   out type_size: longint;
                                   out label_name: shortstring): boolean;
       var
@@ -174,6 +189,7 @@ implementation
         i: longint;
       begin
         result := false;
+        kind := cgk_imm;
         type_size := 0;
         label_name := '';
         if pd = nil then
@@ -184,6 +200,7 @@ implementation
         for i := 0 to high(e.params) do
           if SameText(ident, e.params[i].param_name) then
             begin
+              kind := e.params[i].kind;
               type_size := e.params[i].type_size;
               label_name := 'cg_' + e.params[i].param_name;
               result := true;
@@ -203,16 +220,37 @@ implementation
           end;
       end;
 
-    function pcodegen_type_size(d: tdef): longint;
+    { Classify a codegen-param's type. Returns the byte width AND
+      sets the kind:
+        cgk_imm: ordinal of size 1, 2, or 4 (byte/word/longint family)
+        cgk_ptr: any pointer type (size 4 on i386 / go32v2)
+      Returns 0 (and leaves kind undefined) for unsupported types. }
+    function pcodegen_classify(d: tdef; out kind: tpcodegen_kind): longint;
       var
         sz: asizeint;
       begin
         result := 0;
+        kind := cgk_imm;
+        if d = nil then
+          exit;
+        if is_pointer(d) then
+          begin
+            sz := d.size;
+            if sz = sizeof(pointer) then
+              begin
+                kind := cgk_ptr;
+                result := longint(sz);
+              end;
+            exit;
+          end;
         if not is_ordinal(d) then
           exit;
         sz := d.size;
         if (sz = 1) or (sz = 2) or (sz = 4) then
-          result := longint(sz);
+          begin
+            kind := cgk_imm;
+            result := longint(sz);
+          end;
       end;
 
     function pcodegen_size_typename(sz: longint): shortstring;
@@ -260,6 +298,7 @@ implementation
         vs: tparavarsym;
         entry: tpcodegen_proc_entry;
         sz: longint;
+        kind: tpcodegen_kind;
         pe_idx: longint;
       begin
         result := false;
@@ -305,12 +344,12 @@ implementation
             exit;
           end;
 
-        sz := pcodegen_type_size(hdef);
+        sz := pcodegen_classify(hdef, kind);
         if sz = 0 then
           begin
             Comment(V_Error,
               'codegen-proc: parameter type must be ordinal of size ' +
-              '1, 2, or 4 (byte/word/longint family)');
+              '1, 2, or 4 (byte/word/longint family) OR a pointer type');
             consume(_CODEGEN);
             result := true;
             exit;
@@ -356,10 +395,16 @@ implementation
         entry.params[pe_idx].param_name := vs.realname;
         entry.params[pe_idx].param_def := hdef;
         entry.params[pe_idx].type_size := sz;
+        entry.params[pe_idx].kind := kind;
 
-        Comment(V_Debug,
-          'codegen-proc: parameter "' + vs.realname +
-          '" sized ' + tostr(sz));
+        if kind = cgk_ptr then
+          Comment(V_Debug,
+            'codegen-proc: pointer parameter "' + vs.realname +
+            '" (disp32 patch site)')
+        else
+          Comment(V_Debug,
+            'codegen-proc: parameter "' + vs.realname +
+            '" sized ' + tostr(sz));
 
         result := true;
       end;
@@ -424,9 +469,19 @@ implementation
             ps := entry.params[i];
             ppreproc_emit_ident(buf, cache_name_for(ps.param_name));
             ppreproc_emit_punct(buf, _COLON);
-            ppreproc_emit_ident(buf, pcodegen_size_typename(ps.type_size));
-            ppreproc_emit_punct(buf, _EQ);
-            ppreproc_emit_intliteral(buf, 0);
+            if ps.kind = cgk_ptr then
+              begin
+                { pointer cache: `cg_last_p: pointer = nil;' }
+                ppreproc_emit_ident(buf, 'pointer');
+                ppreproc_emit_punct(buf, _EQ);
+                ppreproc_emit_keyword(buf, _NIL);
+              end
+            else
+              begin
+                ppreproc_emit_ident(buf, pcodegen_size_typename(ps.type_size));
+                ppreproc_emit_punct(buf, _EQ);
+                ppreproc_emit_intliteral(buf, 0);
+              end;
             ppreproc_emit_punct(buf, _SEMICOLON);
           end;
       end;
@@ -450,7 +505,16 @@ implementation
             ps := entry.params[i];
             ln := label_name_for(ps.param_name);
             cn := cache_name_for(ps.param_name);
-            ptn := pcodegen_size_ptype(ps.type_size);
+            { Pointer params use PPointer to land on the disp32; ordinal
+              imm params use PByte/PWord/PLongint to land on the imm
+              bytes. The "back up by 1 stride" trick puts us at the
+              start of the patch field for both: pointer = 4 bytes
+              before the post-instruction label, longint = 4 bytes,
+              word = 2, byte = 1. }
+            if ps.kind = cgk_ptr then
+              ptn := 'PPointer'
+            else
+              ptn := pcodegen_size_ptype(ps.type_size);
 
             ppreproc_emit_keyword(buf, _IF);
             ppreproc_emit_ident(buf, ps.param_name);
@@ -459,13 +523,10 @@ implementation
             ppreproc_emit_keyword(buf, _THEN);
             ppreproc_emit_keyword(buf, _BEGIN);
 
-            { (P<sz>(@<label>) - 1)^ := p; -- the label is emitted
-              by the asm reader IMMEDIATELY AFTER the patched
-              instruction (i.e. one step PAST the imm bytes), so we
-              back up by 1 P<sz> stride to land on the patch byte(s).
-              PByte stride = 1 byte; PWord = 2; PLongint = 4 -- so
-              `PType(@cg_p) - 1' lands on the imm of the matching
-              width. }
+            { (PType(@<label>) - 1)^ := p;
+              The label is emitted by the asm reader IMMEDIATELY AFTER
+              the patched instruction (i.e. one step PAST the patch
+              bytes), so we back up by one PType stride. }
             ppreproc_emit_punct(buf, _LKLAMMER);
             ppreproc_emit_ident(buf, ptn);
             ppreproc_emit_punct(buf, _LKLAMMER);
