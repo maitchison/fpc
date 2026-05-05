@@ -341,6 +341,56 @@ implementation
        constructor create(def : tobjectdef);
      end;
 
+    { Indirect-inline cycle guard.
+
+      The cnf_inline_blocked_self flag (set in check_inlining when
+      current_procinfo.procdef = procdefinition) only catches direct
+      self-recursion *and* cycles that close back to the outermost
+      compiled host. An indirect cycle whose host is NOT a member --
+      e.g. main calls a, a inline-calls b, b inline-calls c, c
+      inline-calls a -- is not caught: at every check, current_procinfo
+      stays pinned to main, and procdefinition cycles a/b/c, so the
+      direct-self comparison never fires.
+
+      The flat per-site SITEBUDGET on `working` removed the depth-decay
+      that historically terminated such cycles "by accident" (legacy
+      formula gave 52 nodes at depth 4, so cycle splicing collapsed
+      within a few levels). Without a depth penalty, pass1_inline +
+      firstpass(inlineblock) recurse forever and the compiler hangs /
+      blows its stack.
+
+      Track the chain of procdefs currently being spliced. Each
+      pass1_inline pushes its procdef before firstpass'ing the spliced
+      body, pops on the way out. check_inlining refuses to splice if
+      the callee is already on the chain -- the recursive call degrades
+      to a plain CALL at codegen time. The OUTER chain inlines normally;
+      only the call that would close the cycle stays as a CALL. }
+    var
+      inline_splice_chain : array of tprocdef;
+
+    procedure inline_splice_push(pd: tprocdef);
+      begin
+        setlength(inline_splice_chain, length(inline_splice_chain)+1);
+        inline_splice_chain[high(inline_splice_chain)]:=pd;
+      end;
+
+    procedure inline_splice_pop;
+      begin
+        if length(inline_splice_chain)=0 then
+          internalerror(2026050501);
+        setlength(inline_splice_chain, length(inline_splice_chain)-1);
+      end;
+
+    function inline_splice_in_chain(pd: tprocdef): boolean;
+      var
+        i : longint;
+      begin
+        for i:=0 to high(inline_splice_chain) do
+          if inline_splice_chain[i]=pd then
+            exit(true);
+        exit(false);
+      end;
+
 
 {****************************************************************************
                              HELPERS
@@ -4970,6 +5020,18 @@ implementation
                   '", direct self-recursion -- stamping cnf_inline_blocked_self so spliced copies stay as plain CALLs');
                 exit;
               end;
+            { Indirect-cycle guard: the callee is already being spliced
+              somewhere up the splice chain (e.g. a -> b -> c -> a where
+              the outermost host is unrelated). Stamping is harmless: the
+              flag survives dogetcopy, so any further copies of this same
+              call node also refuse inlining. }
+            if inline_splice_in_chain(tprocdef(procdefinition)) then
+              begin
+                include(callnodeflags,cnf_inline_blocked_self);
+                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
+                  '", indirect-cycle splice (callee already in active inline_splice_chain) -- emitting plain CALL');
+                exit;
+              end;
             { Honour the gate that psub.pas/checknodeinlining sets. Without
               this, an asm proc that failed is_assembler_inlineable (e.g.
               missing nostackframe) still has its body stored as
@@ -5912,6 +5974,14 @@ implementation
                assigned(tprocdef(procdefinition).inlininginfo^.code)) then
           internalerror(200412021);
 
+        { Push procdefinition onto the splice chain so any inner call
+          to a procdef already on the chain is refused by check_inlining
+          when firstpass(inlineblock) recurses. Pop on the way out via
+          try-finally so an early return still balances the chain. See
+          inline_splice_chain comment near top of implementation. }
+        inline_splice_push(tprocdef(procdefinition));
+        try
+
         inlinelocals:=TFPObjectList.create(true);
 
         { inherit flags }
@@ -6094,6 +6164,10 @@ implementation
         writeln('**************************',tprocdef(procdefinition).mangledname);
         printnode(output,result);
 {$endif DEBUGINLINE}
+
+        finally
+          inline_splice_pop;
+        end;
       end;
 
 end.
