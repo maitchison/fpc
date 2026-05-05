@@ -53,6 +53,12 @@ interface
           comments   : TCmdStrList;
           nsprefix   : TCmdStr; { Namespace prefix the unit was found with }
           loadedfrommodule: tmodule;
+          { Set when openppu fails because the .ppu file's PPU header version
+            does not match this compiler's CurrentPPUVersion. recompile_from_sources
+            uses it to give a richer "no sources available" error that names
+            the version drift instead of the bare "Can't compile unit". }
+          ppu_version_mismatch: boolean;
+          ppu_version_in_file: longint;
 {$ifdef Test_Double_checksum}
           interface_read_crc_index,
           interface_write_crc_index,
@@ -176,6 +182,8 @@ var
         ppufile:=nil;
         sourcefn:=afilename;
         unitimportsymsderefs:=tfplist.create;
+        ppu_version_mismatch:=false;
+        ppu_version_in_file:=0;
       end;
 
 
@@ -327,10 +335,26 @@ var
                Message(unit_u_ppu_invalid_header);
                exit;
              end;
-          { check for allowed PPU versions }
+          { check for allowed PPU versions. The U-level message is queued
+            because the consumer normally handles a mismatch by recompiling
+            from source -- the user need never know. We add a plain Comment
+            with the EXPECTED version + the file path because if the recompile
+            ALSO fails (no sources available, or .ppu has wrong long-version
+            inside the same major version), the queued message alone reads
+            "PPU Invalid Version 33" without saying what the compiler wanted
+            or which file is at fault. Storing the mismatch on the module
+            lets recompile_from_sources's fatal path report it again with
+            full context. }
             if not (ppufile.getversion = CurrentPPUVersion) then
              begin
+               Comment(V_lineinfo+V_Tried,'PPU for unit "'+realmodulename^+
+                 '" has format version '+tostr(ppufile.getversion)+
+                 ' but this compiler expects version '+
+                 tostr(CurrentPPUVersion)+
+                 ' -- the unit needs to be recompiled from source');
                Message1(unit_u_ppu_invalid_version,tostr(ppufile.getversion),@queuecomment);
+               ppu_version_mismatch:=true;
+               ppu_version_in_file:=ppufile.getversion;
                exit;
              end;
           { check the target processor }
@@ -375,6 +399,16 @@ var
           if (longversion<>CurrentPPULongVersion) or
              not ppufile.EndOfEntry then
             begin
+              if longversion<>CurrentPPULongVersion then
+                begin
+                  Comment(V_lineinfo+V_Tried,'PPU for unit "'+realmodulename^+
+                    '" has long-format version '+tostr(longversion)+
+                    ' but this compiler expects long-format version '+
+                    tostr(CurrentPPULongVersion)+
+                    ' -- the unit needs to be recompiled from source');
+                  ppu_version_mismatch:=true;
+                  ppu_version_in_file:=longversion;
+                end;
               Message(unit_u_ppu_invalid_header);
               exit;
             end;
@@ -2389,7 +2423,20 @@ var
                     Message2(unit_f_cant_find_ppu,realmodulename^,loadedfrommodule.realmodulename^);
                 end
               else
-                Message1(unit_f_cant_compile_unit,realmodulename^);
+                begin
+                  { If openppu rejected the .ppu because of a version drift
+                    AND we now also have no source to recompile from, the
+                    bare "Can't compile unit X, no sources available" message
+                    leaves the user wondering why. Surface the .ppu vs current
+                    compiler version as a Comment alongside the fatal so the
+                    actual cause is visible without -vu. }
+                  if ppu_version_mismatch then
+                    Comment(V_Fatal,'Unit "'+realmodulename^+
+                      '" has .ppu version '+tostr(ppu_version_in_file)+
+                      ' but this compiler expects version '+tostr(CurrentPPUVersion)+
+                      ' -- the unit must be recompiled from source, but no source was found');
+                  Message1(unit_f_cant_compile_unit,realmodulename^);
+                end;
             end;
          end;
         { we found the sources, we do not need the verbose messages anymore }
