@@ -7,46 +7,19 @@ Help | What's new...
 
 == IDE 1.0.24 / Compiler 3.4.0 ==
 
-  * Cross-unit asm-inline now actually inlines. Previously a
-    procedure declared `assembler; nostackframe; inline;` in unit
-    A and called from unit B either crashed the compiler with
-    SIGSEGV / EAccessViolation in `inline_clone_asm_labels`, or
-    emitted corrupted external-symbol names into the .o that the
-    linker then refused. Same-unit splices were unaffected, which
-    is why some helpers (e.g. cStart in dev/shared/uTimer.pas)
-    appeared to work some of the time -- the dangling-pointer
-    failure was driven by heap-reuse luck against the providing
-    unit's freed asmdata.
+  * Cross-unit asm-inline now actually inlines instead of crashing
+    the compiler or producing corrupt object files. A helper like
+    cStart declared `assembler; nostackframe; inline;` in one unit
+    and called from another now splices into the caller -- no more
+    `Page Fault at eip=0` / EAccessViolation when compiling
+    dev/video, no more `Undefined symbol: <garbled>` from the
+    linker. Same-unit asm-inline is unchanged.
 
-    The fix has three coordinated parts:
-      - `tcompilerppufile.put/getasmsymbol` (compiler/symtype.pas)
-        round-trip name + bind + typ via a process-global pool
-        in compiler/aasmbase.pas (`inline_asm_symbol_pool`).
-        Previously they were stubs that wrote a longint placeholder
-        and read nil back.
-      - `pmodules.finish_unit` walks every `pio_inline_asm` procdef
-        in the unit and calls `nbas.freeze_inline_asm_body` on its
-        inlininginfo^.code BEFORE `module.end_of_parsing` drops
-        asmdata, so fresh-compiled providers stop dangling for
-        consumers in the same run.
-      - `nbas.clone_one_asmnode_labels` thaws each non-AB_LOCAL
-        pool entry through `current_asmdata.RefAsmSymbol` at splice
-        time so the consumer gets a real AB_EXTERNAL reference;
-        AB_LOCAL pool entries fall through to the existing
-        `getjumplabel`-based label rename.
-
-    PPU bump: `CurrentPPULongVersion` 32 -> 33 because the on-disk
-    record size for asmsymbol references changed.
-
-  * Compiler version bump 3.3.9c -> 3.4.0. The PPU bump above means
-    the new compiler refuses to load PPUs produced by the previous
-    compiler. Bumping the version stamp lets new-format units land
-    at `X:\fpc\units\340\` and leaves the old `X:\fpc\units\339\`
-    tree intact for any 3.3.9-stamped binaries still in use.
-
-  * New regression test `tinlfpc_cstart_xunit` (with companion
-    `ucstartunit.pp`) exercises the cross-unit cStart inline path.
-    Pre-fix it crashes the compiler; post-fix it inlines and runs.
+  * Version bump 3.3.9c -> 3.4.0 (and IDE 1.0.23c -> 1.0.24). The
+    asm-inline fix changes the .ppu format, so the new compiler
+    cannot load older .ppu files. Units now land under
+    `X:\fpc\units\340\` (the old `X:\fpc\units\339\` tree stays
+    intact for any 3.3.9-stamped install you still want to use).
 
 
 == IDE 1.0.23c / Compiler 3.3.9c ==
