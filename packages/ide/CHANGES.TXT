@@ -5,6 +5,44 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.23c / Compiler 3.3.9c ==
+
+  * `%if` inside `asm` blocks of `specialize-set` procedures.
+    Conditional asm gated on a specialize-set parameter now folds
+    correctly per specialisation:
+
+        procedure yog_to_16_mmx(page: tYOG420; yofs: integer = 0;
+                                use_dither: boolean specialize [true, false]);
+        begin
+          asm
+            ...
+            %if use_dither
+              paddusb mm4, dither8[eax*8]
+              paddusb mm5, dither4[eax*8]
+              paddusb mm6, dither8[eax*8]
+            %endif
+            ...
+          end;
+        end;
+
+    Two specialised copies are emitted -- one with the conditional
+    block spliced in, one without -- and the dispatch stub folds
+    constant call sites to a direct call into the matching wrapper.
+
+  * Asm const-expression evaluator handles untyped ordinal constants.
+    `%if` (and `db`, `dw`, etc.) accepts an in-scope `const k = N;`
+    or `const k = TRUE;` reference and inlines the integer value.
+    Boolean/char/enum/integer constants all work; the previous
+    behaviour was "wrong sym type" for any non-staticvar const.
+
+  * Wrapper procs synthesised by specialize-set inherit the source
+    proc's `inline;' directive instead of being unconditionally
+    marked inline. Asm-bodied wrappers (and any other body that
+    triggers `pio_inline_not_possible') now stay regular calls,
+    avoiding spurious notes -- the dispatch stub is still inline,
+    so constant call sites continue to fold to a direct call.
+
+
 == IDE 1.0.23b / Compiler 3.3.9b ==
 
   * `codegen-proc` parameter modifier (v5). A parameter declared
