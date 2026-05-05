@@ -323,12 +323,13 @@ begin
 end;
 
 procedure TIDEApp.WhatsNew;
-var R,R2: TRect;
+var R,R2,DR: TRect;
     D: PCenterDialog;
     M: PFPMemo;
     VSB: PScrollBar;
     S: PFastBufStream;
     Path,Title: string;
+    W,H: sw_integer;
 begin
   Path:=LocateFile(ChangesName);
   if Path='' then
@@ -340,7 +341,10 @@ begin
   New(S, Init(Path, stOpenRead, 4096));
   if S^.Status=stOK then
   begin
-    R.Assign(0,0,72,20);
+    Desktop^.GetExtent(DR);
+    W:=DR.B.X-DR.A.X-4; if W<60 then W:=60; if W>96 then W:=96;
+    H:=DR.B.Y-DR.A.Y-2; if H<16 then H:=16; if H>40 then H:=40;
+    R.Assign(0,0,W,H);
     Title:='What''s new -- '+VersionStr+BuildCommitStr+BuildOptStr;
     New(D, Init(R, Title));
     with D^ do

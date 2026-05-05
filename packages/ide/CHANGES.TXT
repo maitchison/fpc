@@ -2,198 +2,87 @@ Free Pascal IDE / Compiler -- changelog
 =======================================
 
 Most recent version first. The IDE shows this file from
-Help | What's new... (loaded from the install directory at
-runtime; LocateFile searches CWD, IDE startup dir, IDE install
-dir).
+Help | What's new...
 
 
 == IDE 1.0.23a / Compiler 3.3.9a ==
 
-Compiler
-  * `specialize-set' parameter modifier (feature/dynamic-params).
-    A new sugar form for parameters whose runtime value is known
-    to come from a closed set of compile-time constants:
+  * New `specialize-set` parameter modifier. When a parameter
+    only ever takes a few known constant values, you can list
+    them and the compiler will generate a fast specialised
+    path for each:
 
         procedure f(a: integer; k: integer specialize [1, 4, 8]);
         begin
           writeln(a + k * 100);
         end;
 
-    The compiler lowers this to N specialised wrapper procedures
-    (one per set value) plus an inline dispatch stub:
+    Constant call sites collapse to a direct call into the
+    matching specialisation; variable call sites become a small
+    case-table dispatch. Set syntax accepts literals, named
+    consts, and ranges: [1, 4, 8], [0..3], [0, 2, 4..7]. Up to
+    64 specialisations per proc; parameter type must be ordinal.
 
-        procedure f__K_1(a: integer); inline;
-          const k = 1; begin writeln(a + k * 100); end;
-        procedure f__K_4(a: integer); inline; const k = 4; ...
-        procedure f__K_8(a: integer); inline; const k = 8; ...
+    Limitations in this first cut: no methods (class/record/
+    object); only one specialize-set parameter per proc; can't
+    self-recurse from inside the body; can't mix with regular
+    overloads of the same name in the same scope.
 
-        procedure f(a: integer; k: integer); inline;
-        begin
-          case k of
-            1: f__K_1(a);
-            4: f__K_4(a);
-            8: f__K_8(a);
-          end;
-        end;
-
-    The const declarations in each wrapper let FPC's normal
-    constant-folding fold all uses of `k' to the wrapper's value.
-    The dispatch stub's `inline' directive plus its `case' form
-    let constant call sites (e.g. `f(10, 4)') collapse to a direct
-    call to the matching wrapper after stub inlining + tcasenode
-    constant folding. Variable call sites become a real case-table
-    jump.
-
-    Set syntax accepts literals, named consts, and ranges:
-    `[1, 4, 8]', `[0..3]', `[0, 2, 4..7]'. Cap of 64 specialisations
-    per proc. Parameter type must be ordinal.
-
-    v1 limitations:
-      - Methods (class/record/object) not supported.
-      - Mixing with non-specialize-set overloads in the same scope
-        is rejected.
-      - Recursive self-reference inside the body fails to resolve
-        (the user-name is renamed during body parse to free the
-        slot for the dispatch stub).
-      - Multi-parameter specialize-set on one proc is parsed but
-        not yet desugared.
-
-    Implementation: a pure preprocessor pass on the scanner token
-    stream. No AST surgery, no FPC generic machinery. Lives in
-    compiler/pspecset.pas with three hooks into the existing
-    ppreproc framework (pp_at_param_modifier, pp_before_proc_body,
-    pp_after_proc_body).
-
-  * `ppreproc.pas' framework gained `pp_before_proc_body' grammar
-    point and five token-emit primitives (`emit_keyword', `_punct',
-    `_ident', `_ident_as', `_intliteral') for synthesising token
-    streams that replay through the parser as if user-written.
 
 == IDE 1.0.23 / Compiler 3.3.9 ==
 
-Compiler
-  * Intel asm: %if / %elseif / %else / %endif compile-time conditionals
-    in the Intel asm reader (rax86int.pas). Conditional expressions are
-    folded by the existing BuildConstExpression machinery (asm-grammar
-    const-expression parser, returns aint; non-zero == true). Accepts
-    integer constants, in-scope const declarations, +/- /* / mod / shl /
-    shr / not / and / or / xor / parenthesisation. Maintains a per-
-    Assemble pctifstack with (taken, in_branch, seen_else); skip-mode
-    swallows tokens up to AS_SEPARATOR so labels in dead branches are
-    NOT declared. Nested %if inside a skip block forces taken:=true so
-    inner %elseif and %else cannot resurrect a branch. Unbalanced %if
-    at end-of-block raises asmr_e_syntax_error. AT&T reader is
-    unchanged (Intel-only feature).
+  * Intel asm conditionals. `%if / %elseif / %else / %endif`
+    now work inside Intel-syntax asm blocks, with the usual
+    integer arithmetic and in-scope const references in the
+    condition. AT&T asm is unchanged.
 
-  * Inline-heuristic defaults updated: -OoINLINESITEBUDGET defaults to
-    1000 (was 0 = legacy depth formula). The flat per-site model is now
-    the default behaviour out of the box. Legacy depth formula gave
-    10000 / 1000 / 251 / 100 / 52 nodes at depths 0..4; the depth
-    penalty rejected mid-sized helpers anywhere four-deep in a call
-    tree. 1000 matches the legacy depth-1 ceiling so any candidate
-    legacy accepted at depth >=1 still inlines; only the unhinged
-    depth-0 ceiling of 10000 tightens. To restore the previous
-    behaviour: -OoINLINESITEBUDGET=0.
+  * Inlining is more aggressive by default. The classic depth-
+    decay formula has been replaced with a flat per-call-site
+    budget (1000 nodes), so mid-sized helpers no longer get
+    rejected just for being four calls deep. To restore the
+    previous behaviour: `-OoINLINESITEBUDGET=0`.
 
-  * is_assembler_inlineable diagnostics. The asm-inline gate in
-    psub.pas previously returned a bare boolean; the call site emitted
-    just "Note: assembler not yet supported inside inline procedure/
-    function" with no clue why. The gate now returns a specific reason
-    string per failure mode -- missing nostackframe, non-trivial return
-    type with the type name, param N has unsupported type/spec/size,
-    asm body contains unsplicable construct, and a new explicit
-    pocall_register check that emits "calling convention is not
-    register (got pocall_stdcall)". The pocall_register gate makes the
-    rejection reason clear up-front instead of bubbling out of
-    paraloc_is_single_intreg. On i386 register CC is the default
-    proccalloption, so the user does NOT need to write `register;`.
+  * Better diagnostics when an `assembler; inline;` proc is
+    rejected. Instead of the bare "assembler not yet supported
+    inside inline procedure", the compiler now tells you exactly
+    why -- missing `nostackframe`, unsupported parameter type,
+    wrong calling convention, etc.
 
-  * Inline-asm rejection now blocks the splice. check_inlining
-    (ncal.pas) used to set cnf_do_inline based only on (po_inline +
-    has_inlininginfo + heuristics) and ignored the
-    pio_inline_not_possible flag that psub.pas/is_assembler_inlineable
-    set on rejection -- the flag was only consulted at the
-    cg_n_no_inline warning site. As a result, an `assembler; inline;`
-    proc declared without `nostackframe` was correctly rejected by the
-    gate, but pass1_inline still ran and crashed when it tried to
-    splice an asm body that contained a prologue/epilogue. Fixed:
-    check_inlining bails early when pio_inline_not_possible is set,
-    emits a diagnostic note pointing at the prior
-    parser_n_not_supported_for_inline message.
+  * Inline-tuning knobs. Four `-Oo<KEY>=N` options to tune
+    inlining policy:
+        -OoINLINEAUTOLIMIT=N    auto-inline gate (default 25)
+        -OoINLINEHARDCAP=N      hard per-site body cap
+        -OoINLINEGROWTHCAP=N    cumulative growth cap per proc
+        -OoINLINESITEBUDGET=N   flat per-site budget (default 1000;
+                                set 0 for the legacy depth formula)
+    Use `-vy` to see why a call wasn't inlined and `-vd` to see
+    auto-inline decisions.
 
-  * Inline-heuristic knobs. The two inlining decisions in the
-    compiler -- the auto-inline gate and the per-call-site gate --
-    previously had hard-coded magic numbers (25 and a depth-decay
-    formula peaking at 10000 nodes at depth 0). Both are now
-    overridable via four new -Oo<KEY>=<N> options:
 
-      -OoINLINEAUTOLIMIT=N    (default 25)
-          Auto-inline gate threshold. With -OoAUTOINLINE on, a
-          procedure is auto-marked po_inline iff
-              node_count(body) + node_complexity(body) <= N.
-          Lower N = pickier; higher = more eager. -OoAUTOINLINE
-          is OFF in every -OX preset; opt in explicitly.
+== IDE 1.0.18 .. 1.0.22 / Compiler 3.3.4 .. 3.3.8 ==
 
-      -OoINLINEHARDCAP=N      (default 0 = no cap)
-          Per-call-site absolute body cap. Rejects any inline
-          whose body exceeds N nodes regardless of context. The
-          legacy depth formula allowed up to ~9999 nodes at the
-          top level; setting N=200 (or so) bounds the worst case.
+(These features rolled in over several versions. Listed here
+together because they form one coherent extension to inline
+assembler.)
 
-      -OoINLINEGROWTHCAP=N    (default 0 = no cap)
-          Per-procedure cumulative inline-growth cap. Tracks how
-          many nodes have been spliced into the enclosing routine
-          by prior accepted inlines and rejects further inlines
-          once cumulative growth would exceed N. Catches the
-          wide-but-shallow case the depth formula misses.
+  * Inline assembler functions. Procedures and functions
+    declared `assembler; nostackframe; inline;` are now spliced
+    directly into the caller -- no `call`/`ret`, just the body's
+    instructions emitted in place. This started as zero-arg
+    void-return procs and grew incrementally:
 
-      -OoINLINESITEBUDGET=N   (default 0 = use legacy depth formula)
-          When N>0, replaces the depth-decay formula
-                                 inlinelevel/3+1    /-------
-              node count <      -----------------\/  10000
-          with a flat per-site budget: inline iff body node
-          count <= N. No depth term. Combine with HARDCAP /
-          GROWTHCAP to bound aggregate growth.
+      - bodies may reference globals and typed constants
+      - bodies may use local labels and branch between them;
+        each splice gets its own fresh set of labels so the same
+        helper can be inlined many times in one routine
+      - functions may return a value when the result fits in a
+        single integer register (longint, dword, pointer, ...)
+      - parameters may be taken in registers (the default
+        `register;` cc on i386 puts the first three integer args
+        in `%eax`, `%edx`, `%ecx`, and the body sees them there
+        directly -- no need to name them in the body)
 
-    Knobs compose: HARDCAP first, then GROWTHCAP, then either
-    SITEBUDGET (if non-zero) or the legacy depth formula. All
-    four default to values that reproduce pre-knob behaviour
-    byte-for-byte; bad input (negative N, non-numeric N) is
-    rejected at parse time.
-
-    Diagnostics: -vy shows "Not inlining ..." rejections from
-    the call-site gate (with the limit value that fired); -vd
-    shows "Auto inlining: ..." from the auto-inline gate.
-
-  * Inline-asm functions may now take parameters that the calling
-    convention pins to a single integer register (typically the
-    `register;` cc on i386 -- first three integer args land in
-    `%eax`, `%edx`, `%ecx`). The asm body sees the para values
-    in those registers directly; there is no need to reference the
-    para name inside the body. Combined with v2(d), an inline-asm
-    proc can take register-cc paras AND return a value in a single
-    integer register, so e.g. `function add(a,b: longint): longint;
-    register; assembler; nostackframe; inline;` with body
-    `addl %edx, %eax` splices into the caller as a single `addl`
-    plus whatever the caller needs to load `a` and `b` into the
-    ABI registers.
-
-    The gate (`is_assembler_inlineable`) requires each non-hidden
-    para to have `varspez in [vs_value, vs_const]` and a calleeside
-    paraloc that's a single integer-class register. Stack-passed,
-    by-reference (`var`/`out`/`constref`), multi-register, and FPU/
-    MM-register paras are all rejected.
-
-    At splice time, `pass1_inline` calls `init_paraloc_info(calleeside)`
-    on the procdef (for cross-unit-loaded callees) and, for each
-    qualifying para, hoists the argument expression into a fresh
-    value temp (via `ctempcreatenode` + `cassignmentnode`), then
-    appends a `tregcapturenode(rcd_load)` that copies the temp into
-    the ABI register and intentionally omits the matching
-    `ungetcpuregister` -- the following tasmnode's
-    `deallocallcpuregisters` at end-of-body releases the reg.
-
-    Example:
+    Combined, these let you write things like:
 
         function add(a, b: longint): longint;
           register; assembler; nostackframe; inline;
@@ -201,238 +90,105 @@ Compiler
           addl %edx, %eax
         end;
 
-        var x: longint;
-        x := add(1, 2) + add(3, 4);   { four splices: 2 loads + 1 capture each }
+    and have `x := add(1, 2) + add(3, 4);` collapse to four
+    inline `addl` instructions plus the loads needed by the
+    caller. Stack-passed args, by-reference params (var/out/
+    constref), FPU/MM-register params, and float/multi-register
+    returns are still rejected by the gate.
 
+    Treat this as a useful but lightly-tested extension. If a
+    pure-asm proc that compiled fine before suddenly errors or
+    produces strange code, the inliner is the first thing to
+    suspect -- removing the `inline;` directive is a quick way
+    to confirm.
 
-== IDE 1.0.22 / Compiler 3.3.8 ==
-
-Compiler
-  * Inline-asm functions may now return a value when the result fits
-    in a single integer register (longint, dword, pointer, ...). The
-    body still has zero parameters and writes its result to the ABI
-    funcret register the usual way (`%eax` on i386); after the body
-    is spliced into the caller, a synthetic `tregcapturenode` copies
-    that register into the funcret temp the inliner created on the
-    caller side. The capture is bracketed by `cg.getcpuregister` /
-    `cg.ungetcpuregister` so the regalloc treats the value as a real
-    use across the asmnode's all-cpu-regs alloc/dealloc bracket.
-
-    Float, MM-register, multi-register-pair, and memory-via-hidden-
-    funcret-para returns are still rejected by `is_assembler_inlineable`
-    -- the gate uses `paraloc_is_single_intreg(funcretloc[calleeside])`.
-    Assignment-target reuse (`x := f();` collapsing the temp into `x`)
-    is disabled for asm-inline procs so `pass1_inline` only ever sees
-    a `temprefn`-shaped funcretnode.
-
-    Example:
-
-        function ten: longint; assembler; nostackframe; inline;
-        asm
-          movl $10, %eax
-        end;
-
-        var x: longint;
-        x := ten + ten;        { spliced twice, no `call ten` emitted }
-
-
-== IDE 1.0.21 / Compiler 3.3.7 ==
-
-Compiler
-  * Inline-asm bodies may now contain user-defined local labels and
-    branches between them. Previously `ait_label` was rejected outright
-    by the body-shape check; now labels are accepted, and at every call
-    site of an inline-asm proc the cloned tasmlist is post-processed by
-    nbas.inline_clone_asm_labels: a fresh tasmlabel is allocated via
-    current_asmdata.getjumplabel for each label DEFINITION, and every
-    in-body reference (branch operand or ait_const data sym) is
-    rewritten to point at the new label. Splicing the same body N
-    times into one caller now produces N distinct sets of labels
-    instead of an "duplicate label" assembler error. References to
-    symbols that are NOT defined inside the body (globals, typed-
-    consts, externals) are left untouched.
-
-    Example (still constrained to the v1+v2(a) zero-param/void-return
-    rules until v2(b)/v2(d) land):
-
-        var counter: longint;
-        procedure inc_to_eight; assembler; nostackframe; inline;
-        asm
-          movl counter, %eax
-        @loop:
-          cmpl $8, %eax
-          jge @done
-          incl %eax
-          jmp @loop
-        @done:
-          movl %eax, counter
-        end;
-
-
-== IDE 1.0.20 / Compiler 3.3.6 ==
-
-Compiler
-  * Inline-asm bodies may now reference globals, typed constants, and
-    other unit-scope symbols. The body-shape check that previously
-    rejected `top_ref` operands with a `symbol`/`relsymbol` attached
-    and `ait_const` data with a sym now accepts them. asmsymbols are
-    unit-global; getcopy preserves the pointer in the same unit, and
-    the existing PPU writer (taicpu.ppuwriteoper / putasmsymbol)
-    already round-trips them across units, so no PPU bump is needed
-    for this change. Examples now eligible:
-
-        var counter: longint;
-        procedure inc_counter; assembler; nostackframe; inline;
-        asm
-          incl counter
-        end;
-
-    Local labels, top_local operands, and label-referencing operands
-    remain rejected (handled by later v2 changes).
-
-
-== IDE 1.0.19 / Compiler 3.3.5 ==
-
-Compiler
-  * Inline expansion now works for pure-asm `assembler; nostackframe;`
-    procedures. Previously any `pi_has_assembler_block` flag rejected
-    inlining outright; now `procedure foo; assembler; nostackframe;
-    inline; asm ... end;` with zero parameters and a void return type
-    is eligible. The body's tasmlist is round-tripped through PPU and
-    spliced at the call site without a `call`/`ret`. v1 rejects
-    parameters, non-void returns, named labels, symbol references in
-    operands, and operand kinds outside `top_reg`/`top_const`/`top_bool`/
-    clean `top_ref`. Functions and parameterised procs follow once the
-    register-coordination machinery is in place.
-  * x86 PPU format now serialises `taicpu.opsize` and the operand-order
-    flag. Without these, cross-unit inline expansion of asm bodies left
-    memory operands sized as `mem??`, breaking the matcher on
-    `addl $0,0(%esp)`-style barriers in the RTL once SYSTEMINLINE
-    activated the new asm-inline path. PPU long version bumped to 32.
-
-
-== IDE 1.0.18 / Compiler 3.3.4 ==
-
-Compiler
-  * New syntax: `var x: T align N;` for static globals. Lets a single
+  * `var x: T align N;` for static globals. Lets a single
     declaration request stricter alignment than the target's
-    varalignmax cap. Plumbed through tstaticvarsym.varalign and
-    folded into the existing explicitalign path in
-    ngenutil.insertbssdata, so the BSS slot is emitted at >= N
-    even when N > target_info.alignment.varalignmax. Useful for
-    MMX/SSE scratch globals on go32v2 that need 8/16-byte
-    alignment without a getmem-and-align dance:
+    default cap -- handy for MMX/SSE scratch globals on go32v2
+    that need 8/16-byte alignment without a getmem-and-align
+    dance:
 
         var mmreg : qword align 8;
         var sse_buf : array[0..3] of single align 16;
 
-    N must be a power of two in 1..128. Locals/parameters are
-    silently ignored (the prologue does not realign ESP).
-
-  * Initialised vars (`var x: T align N = init;`) now produce a
-    parse-time error with a hint when N exceeds the target's
-    typed-const cap (constalignmax = 4 on go32v2):
-
-        Error: `align 8` on initialised "x" exceeds target
-        typed-const cap (4); declare BSS and assign in initialization.
-
-    The cap is a DJGPP COFF object-format limitation -- per-symbol
-    section alignment is encoded in only 2 bits, so a `.balign 8`
-    inside `.data.n_<sym>` is silently clamped to 4 by the linker.
-    The error catches it instead of letting it look correct but
-    be wrong.
-
-  * PPU long-version bumped 30 -> 31 (staticvarsym format gained
-    a varalign byte). All units must be rebuilt.
+    N must be a power of two in 1..128. Initialised vars
+    (`var x: T align N = init;`) are limited to N <= 4 on
+    go32v2 (DJGPP COFF object-format constraint); the compiler
+    raises an error rather than silently clamping. Locals and
+    parameters are not aligned (the prologue does not realign
+    ESP).
 
 
 == IDE 1.0.17 / Compiler 3.3.3 ==
 
-IDE
-  * Quick-Open (Ctrl+U): typing a '.' in the filter switches
-    to a mask-ignoring corpus and matches against the full
-    basename, so files outside the IncludeMask (e.g. play.log)
-    show up as you type. Pressing Enter on a query containing
-    a '.' that has no listbox match resolves the literal text
-    against the project dir + every -Fu/-Fi search dir and
-    opens it if found -- so 'play.log' loads even when the
-    mask only covers Pascal sources.
-  * File|Open, File|Open Recent, and OpenSearch no longer
-    open a second editor window when the file is already
-    open on the desktop -- the existing window is focused
-    instead. Previously each open created a fresh window,
-    so the same file could end up loaded several times in
-    parallel with diverging unsaved edits. Navigation paths
-    (Ctrl+Enter go-to-def, nav stack, command-line args,
-    find-in-files results, breakpoints) already deduped;
-    this brings the menu paths into line. File|New and
-    File|New From Template still create fresh untitled
-    windows.
+  * Quick-Open (Ctrl+U): typing a `.` in the filter now matches
+    the full basename, so files outside the editor's mask (e.g.
+    `play.log`) show up as you type. Pressing Enter on an entry
+    with a `.` that has no listbox match resolves the literal
+    text against the project dir and every -Fu/-Fi search dir
+    and opens it if found.
+
+  * File|Open, File|Open Recent, and OpenSearch no longer open
+    a second editor window when the file is already open --
+    they focus the existing window instead. (File|New still
+    creates a fresh untitled window.) Stops the same file
+    ending up loaded twice with diverging unsaved edits.
 
 
 == IDE 1.0.16 / Compiler 3.3.3 ==
 
 IDE
-  * Quick-Open (Ctrl+U): mask textbox lets you filter the file
-    list by extension or name pattern; persists across sessions.
-    Result list now sorts by extension priority so .pas/.pp
-    sources show ahead of .ppu/.o build artefacts.
-  * DOS Shell: command prompt is marked so the user can tell
-    they're in a shell-out; refuses to re-enter while one is
-    already running (FPISDOSSHELL env-var guard). Avoids the
-    stacked-IDE / leaked-temp-files trap.
+  * Quick-Open (Ctrl+U): mask textbox to filter the file list
+    by extension or name pattern; persists across sessions.
+    Result list sorts so .pas/.pp sources show ahead of .ppu/.o
+    build artefacts.
+  * DOS Shell: command prompt is marked so you can tell you're
+    in a shell-out; refuses to re-enter while one is already
+    running -- avoids the stacked-IDE / leaked-temp-files trap.
   * Editor color fixes; new INI and ASM file syntax highlighting.
   * Run profiles: named bundles of (main file, run params),
     switchable from the Run menu. Per-project, persisted with
     the desktop.
   * Alt+Up / Alt+Down: jump between interface declaration and
     implementation of the procedure under the cursor.
-  * Ctrl+Enter go-to-definition; Alt+Left / Alt+Right back/forward
-    navigation history (browser-style).
-  * Shift+Tab peek-definition popup -- shows the declaration
-    of the symbol under the cursor without leaving your spot.
+  * Ctrl+Enter go-to-definition; Alt+Left / Alt+Right back/
+    forward navigation history (browser-style).
+  * Shift+Tab peek-definition popup -- shows the declaration of
+    the symbol under the cursor without leaving your spot.
   * Find in Files: dialog state (last query, mask, options)
-    persists across sessions; fix command-code collision that
+    persists across sessions; fixed a command-code clash that
     was triggering Comment-selection instead.
   * Search | Jump to Asm: grayed out when no source is focused.
   * Wordstar prefix chord (Ctrl-K, Ctrl-Q) no longer eats its
-    second key when the key matches a menu hot-key letter
+    second key when that key matches a menu hot-key letter
     (e.g. Ctrl-K W).
-  * Help | What's new...: this dialog. Loads CHANGES.TXT from
-    the install directory at runtime.
+  * Help | What's new...: this dialog.
   * About box and splash banner now show "-O3" suffix when the
-    binary was built with the -O3 chain (BUILD_O3 define,
-    flipped on by build-full-go32v2-o3.sh).
+    binary was built with the -O3 chain.
 
 Compiler
-  * fppu: reopen parent ppufile after deferred load. Fixes
-    SIGSEGV / IDE "signal 291" when the trunk ctask scheduler
-    left a parent ppu tempclosed while compiling a unit that
-    triggered deferred reads.
-  * browcol: replace TPointerDictionary sorted-collection with
-    a chained hash table. Large speed-up for symbol browsing on
-    big projects where the old O(N log N) insert dominated.
+  * Faster symbol browsing on large projects (browcol switched
+    from a sorted collection to a hash table -- the old
+    O(N log N) insert dominated on big projects).
 
 
 == IDE 1.0.15 / Compiler 3.3.2 ==
 
-First version to stamp build commit short hash into the binary
-banners (e.g. "3.3.2-a885a49" / "1.0.15-a885a49") via
-compiler/revision.inc and packages/ide/ide_revision.inc emitted
-by build-full-go32v2*.sh.
+First version to stamp the build commit short hash into the
+binary banners (e.g. "3.3.2-a885a49" / "1.0.15-a885a49").
 
 IDE
   * Ctrl+U Quick-Open by filename across project + -Fu/-Fi paths.
   * Find in Files (Ctrl+Shift+F), results in the Messages window.
-  * Search | Jump to Asm Source (Alt+A); auto-recompiles -al
-    if needed.
+  * Search | Jump to Asm Source (Alt+A); auto-recompiles -al if
+    needed.
   * Open source files maximized + optional chromeless full-screen
     mode (F5 toggles); two new flags in Options | Editor.
   * S3-specific wide text-mode probe runs after VBE enumeration
-    so S3-family chipsets expose 100/132-column modes the BIOS
-    hides.
+    so S3-family chipsets expose the 100/132-column modes that
+    the BIOS hides.
   * Recent Files uses move-to-front MRU on every open.
-  * DOS Shell / File | Open anchor to the IDE's launch PWD.
+  * DOS Shell / File|Open anchor to the IDE's launch directory.
   * Pentium CPU-target menu labels corrected (-CpPENTIUM2 was
     mis-labelled "PentiumMMX" -- selecting it on a real P55C
     crashed with invalid-opcode / page fault).
@@ -440,13 +196,14 @@ IDE
 Compiler (i386)
   * New PENTIUMMMX cputype (P55C; P5 + MMX, no CMOV) between
     Pentium and Pentium 2.
-  * -CpPENTIUM4 etc. now auto-define CPUX86_HAS_MMX / _SSEUNIT /
-    _SSE2 to match the selected cputype -- no manual -d flags
-    needed.
-  * x86 peephole: imul by 2^n +/- 1 lowers to lea/shl + add/sub.
+  * -CpPENTIUM4 and friends now auto-define CPUX86_HAS_MMX /
+    _SSEUNIT / _SSE2 to match the selected cputype -- no manual
+    -d flags needed.
+  * Faster integer multiply by 2^n +/- 1 (peephole now lowers
+    these to lea/shl + add/sub).
 
 RTL (i386 / go32v2)
-  * FillChar / FillWord / FillDWord / FillQWord MMX variants,
+  * MMX FillChar / FillWord / FillDWord / FillQWord variants,
     auto-dispatched on MMX-capable CPUs without SSE2.
   * Move: startup probe detects broken 64-bit-precision emulator
     FPUs (em-dosbox, 86Box default) and falls back to a plain
