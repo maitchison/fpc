@@ -5044,26 +5044,6 @@ implementation
               naming the exact construct. Don't re-announce per call site. }
             if pio_inline_not_possible in tprocdef(procdefinition).implprocoptions then
               exit;
-            { asm-inline cross-unit gap: tasmsymbol references inside the
-              cloned asm body (top_ref operand symbols, ait_const sym, label
-              symbols) are NOT serialised across the PPU boundary --
-              tcompilerppufile.putasmsymbol/getasmsymbol are stubs that
-              write/read a longint placeholder. For SAME-unit inlining the
-              body's tasmsymbol pointers are still valid because
-              current_asmdata persists for the unit's whole compilation.
-              For CROSS-unit inlining the providing unit's asmdata is
-              already freed by the time the consumer splices the body, so
-              the operand symbol pointers dangle: codegen reads garbage
-              names and the assembler emits corrupted external references
-              (sometimes the compiler outright SIGSEGVs in the asm
-              reader). Reject the splice cleanly until the gap is closed. }
-            if (pio_inline_asm in tprocdef(procdefinition).implprocoptions) and
-               (findunitsymtable(procdefinition.owner).moduleid<>current_module.moduleid) then
-              begin
-                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
-                  '", cross-unit asm-inline disabled (tasmsymbol refs are not PPU-serialised; same-unit inlining still works)');
-                exit;
-              end;
             if not tprocdef(procdefinition).has_inlininginfo then
               begin
                 { SCC inline-deferral, slice 1: if the called procdef

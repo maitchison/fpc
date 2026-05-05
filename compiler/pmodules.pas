@@ -1787,6 +1787,8 @@ type
         store_indirect_crc : cardinal;
 {$ifdef debug_devirt}
         i : longint;
+{$else}
+        i : longint;
 {$endif}
         hstatus : TFPCHeapStatus;
         old_module: tmodule;
@@ -1883,6 +1885,23 @@ type
         Message1(unit_u_finished_compiling,module.modulename^);
 
         module_is_done(module);
+        { Freeze every pio_inline_asm body BEFORE module.end_of_parsing
+          drops asmdata. The bodies live on the procdef's inlininginfo^.code
+          and reference tasmsymbol pointers from this module's asmdata; if
+          we left them as-is they'd dangle the moment any other module
+          (compiled later in the same run) tried to splice them. The pool
+          entries that replace them carry name+bind+typ for splice-time
+          re-resolution against the consumer's current_asmdata.
+          Idempotent: bodies that are already frozen (e.g. came in via
+          .ppu round-trip, the path through tcompilerppufile.getasmsymbol
+          + lookup_inline_asm_pool_by_name) are no-ops. }
+        for i:=0 to module.deflist.count-1 do
+          if assigned(module.deflist[i]) and
+             (tdef(module.deflist[i]).typ=procdef) and
+             (pio_inline_asm in tprocdef(module.deflist[i]).implprocoptions) and
+             tprocdef(module.deflist[i]).has_inlininginfo and
+             assigned(tprocdef(module.deflist[i]).inlininginfo^.code) then
+            freeze_inline_asm_body(tprocdef(module.deflist[i]).inlininginfo^.code);
         module.end_of_parsing;
 
 {$ifdef DEBUG_NODE_XML}

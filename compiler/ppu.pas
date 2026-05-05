@@ -48,7 +48,11 @@ const
   CurrentPPUVersion = 208;
   { for any other changes to the ppu format, increase this version number
     (it's a cardinal) }
-  CurrentPPULongVersion = 32;
+  { 33: tcompilerppufile.put/getasmsymbol now serialise name+bind+typ
+        (length-prefixed ansistring + 2 bytes) instead of a longint
+        placeholder. Old PPUs will be re-read with a different cursor
+        offset and explode; bump forces a re-compile. See symtype.pas. }
+  CurrentPPULongVersion = 33;
 
 { unit flags }
   uf_big_endian          = $000004;

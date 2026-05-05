@@ -1162,10 +1162,29 @@ implementation
       end;
 
 
+    { tasmsymbol round-trip across PPU. Inline-asm bodies stored on
+      tprocdef.inlininginfo^.code reference tasmsymbol pointers (top_ref
+      operand symbols, ait_const sym/endsym, label refs); without a real
+      put/get pair the consumer reads nil or dangling pointers and either
+      crashes or emits corrupted external-symbol names. We round-trip via
+      name+bind+typ into the process-global inline_asm_symbol_pool, which
+      hands out stable TAsmSymbol identities by name; clone_one_asmnode_labels
+      then thaws each non-AB_LOCAL pool entry back into a real
+      current_asmdata symbol at splice time. }
     function  tcompilerppufile.getasmsymbol:tasmsymbol;
+      var
+        flag: byte;
+        nm: ansistring;
+        bind: TAsmsymbind;
+        typ: TAsmsymtype;
       begin
-        getlongint;
-        getasmsymbol:=nil;
+        flag:=getbyte;
+        if flag=0 then
+          exit(nil);
+        nm:=getansistring;
+        bind:=TAsmsymbind(getbyte);
+        typ:=TAsmsymtype(getbyte);
+        getasmsymbol:=lookup_inline_asm_pool_by_name(nm,bind,typ);
       end;
 
 
@@ -1324,9 +1343,20 @@ implementation
       end;
 
 
+    { Companion to getasmsymbol -- writes name+bind+typ if assigned.
+      The tag byte at the front lets the reader distinguish nil cleanly
+      without resorting to magic name-empty conventions. }
     procedure tcompilerppufile.putasmsymbol(s:tasmsymbol);
       begin
-        putlongint(0);
+        if not assigned(s) then
+          begin
+            putbyte(0);
+            exit;
+          end;
+        putbyte(1);
+        putansistring(s.Name);
+        putbyte(byte(s.bind));
+        putbyte(byte(s.typ));
       end;
 
 {$ifdef MEMDEBUG}
