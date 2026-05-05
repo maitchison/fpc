@@ -450,14 +450,6 @@ implementation
         vs := tparavarsym(sc[0]);
 
         consume(_SPECIALIZE);
-        if current_scanner.token <> _LECKKLAMMER then
-          begin
-            Comment(V_Error,
-              'specialize-set: `['' expected');
-            result := true;
-            exit;
-          end;
-        consume(_LECKKLAMMER);
 
         entry := pspecset_find(pd);
         if entry = nil then
@@ -467,10 +459,35 @@ implementation
 
         setlength(values, PSPECSET_MAX_VALUES);
         nvalues := 0;
-        if not parse_set_body(values, nvalues, PSPECSET_MAX_VALUES) then
+
+        if current_scanner.token <> _LECKKLAMMER then
           begin
-            result := true;
-            exit;
+            { Boolean shortcut: `x: boolean specialize' (no bracket list)
+              auto-fills [false, true]. Only ordinal types whose full
+              value space is exactly two values qualify; non-boolean
+              ordinals still require an explicit set. }
+            if is_boolean(hdef) then
+              begin
+                values[0] := 0;
+                values[1] := 1;
+                nvalues := 2;
+              end
+            else
+              begin
+                Comment(V_Error,
+                  'specialize-set: `['' expected');
+                result := true;
+                exit;
+              end;
+          end
+        else
+          begin
+            consume(_LECKKLAMMER);
+            if not parse_set_body(values, nvalues, PSPECSET_MAX_VALUES) then
+              begin
+                result := true;
+                exit;
+              end;
           end;
 
         new_count := nvalues;
@@ -643,6 +660,22 @@ implementation
         end;
       end;
 
+    { Emit a literal of the right textual form for the param def: int
+      literal for ordinals in general, but `false'/`true' identifiers
+      for booleans (so the resulting `case <bool> of 0:..' compiles). }
+    procedure emit_value_literal(buf: tppreproc_buf; v: int64; param_def: tdef);
+      begin
+        if assigned(param_def) and is_boolean(param_def) then
+          begin
+            if v = 0 then
+              ppreproc_emit_ident(buf, 'false')
+            else
+              ppreproc_emit_ident(buf, 'true');
+          end
+        else
+          ppreproc_emit_intliteral(buf, v);
+      end;
+
     { Emit:
         procedure <wrapper_name>(<sig minus k>); inline;
         const <kname> = <v>;
@@ -654,7 +687,8 @@ implementation
                            const kname: shortstring;
                            const emit_paras: array of tspecset_emit_param;
                            paras_count: longint;
-                           body_buf: tppreproc_buf);
+                           body_buf: tppreproc_buf;
+                           param_def: tdef);
       var
         i: longint;
         first_para: boolean;
@@ -683,11 +717,13 @@ implementation
         ppreproc_emit_ident_as(buf, 'inline', _INLINE);
         ppreproc_emit_punct(buf, _SEMICOLON);
 
-        { const k = <v>; }
+        { const k = <v>; -- value form depends on the param's type so
+          that boolean specialisations emit `const k = false;' instead
+          of `const k = 0;' (untyped 0 would not match boolean uses). }
         ppreproc_emit_keyword(buf, _CONST);
         ppreproc_emit_ident(buf, kname);
         ppreproc_emit_punct(buf, _EQ);
-        ppreproc_emit_intliteral(buf, v);
+        emit_value_literal(buf, v, param_def);
         ppreproc_emit_punct(buf, _SEMICOLON);
 
         { Body tokens: local decls + begin..end. }
@@ -711,7 +747,8 @@ implementation
                                  const kname: shortstring;
                                  const emit_paras: array of tspecset_emit_param;
                                  paras_count: longint;
-                                 const values: array of int64);
+                                 const values: array of int64;
+                                 param_def: tdef);
       var
         i, j: longint;
         first_arg: boolean;
@@ -745,7 +782,7 @@ implementation
 
         for i := 0 to high(values) do
           begin
-            ppreproc_emit_intliteral(buf, values[i]);
+            emit_value_literal(buf, values[i], param_def);
             ppreproc_emit_punct(buf, _COLON);
             ppreproc_emit_ident(buf, fname + '__K_' + tostr(values[i]));
             ppreproc_emit_punct(buf, _LKLAMMER);
@@ -840,14 +877,16 @@ implementation
                             tostr(param_entry.values[i]);
             emit_wrapper(inject_buf, wrapper_name,
                          param_entry.values[i], kname,
-                         emit_paras, paras_count, entry.body_buf);
+                         emit_paras, paras_count, entry.body_buf,
+                         param_entry.param_def);
           end;
 
         { The user's procsym was already renamed in SS-A; orig_name
           is now free for the dispatch stub to claim when its decl
           parses out of the inject buffer. }
         emit_dispatch_stub(inject_buf, orig_name, kname,
-                           emit_paras, paras_count, param_entry.values);
+                           emit_paras, paras_count, param_entry.values,
+                           param_entry.param_def);
 
         { read_proc_body (psub.pas:2912) will call consume(_SEMICOLON)
           shortly after we return -- it expects the `;' that follows
