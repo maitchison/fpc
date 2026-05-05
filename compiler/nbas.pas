@@ -405,9 +405,20 @@ interface
          on its cloned asmnodes so that splicing N copies into one caller does
          not produce N definitions of the same .LjXX symbol. References to
          symbols that are NOT defined inside this body (globals, typed-consts,
-         labels in other procs) are left untouched. Walks all asmnodes
-         contained inside `n`. }
+         labels in other procs) are also re-resolved into current_asmdata so
+         the cross-unit case stops dangling on the providing unit's freed
+         asmsymbol pointers. Walks all asmnodes contained inside `n`. }
        procedure inline_clone_asm_labels(n: tnode);
+
+       { Walks `n` once at end-of-parsing for the providing unit and replaces
+         every tasmsymbol pointer reachable from its asmnodes with a stable
+         pool entry (aasmbase.freeze_inline_asm_symbol). The pool keeps the
+         identity (name/bind/typ) alive for the rest of the compiler run so
+         that subsequent splices -- in this run after the providing unit's
+         asmdata.free, in later runs after a .ppu round-trip -- can re-resolve
+         each non-local symbol against the consumer's current_asmdata at
+         splice time without dangling. Idempotent. }
+       procedure freeze_inline_asm_body(n: tnode);
 
        { True iff `op` is a top_local operand referring to a parameter whose
          callee-side paraloc is a single integer register. Used both at gate
@@ -530,13 +541,37 @@ implementation
       end;
 
 
-    { Internal: rename body-local labels in a single tasmnode's tasmlist. Two
-      passes: pass 1 finds every label DEFINITION, allocates a fresh tasmlabel
-      via current_asmdata.getjumplabel, and rewrites tai_label.labsym to the
-      new label, building a name->newlabel map. Pass 2 walks every operand and
-      ait_const data sym; any reference whose symbol name is in the map gets
-      rewritten to point at the new label. Symbols that are not in the map
-      (globals, typed-consts, externals) are left untouched. }
+    { Re-resolve a non-local asmsymbol pointer against the consumer's
+      current_asmdata. Pool entries (frozen at end-of-parsing of the
+      providing unit) and any cross-unit/PPU-loaded references all carry
+      a stable name; current_asmdata.RefAsmSymbol returns the SAME object
+      for same-unit splices that still see real-asmdata-side pointers
+      (the symbol is already in current_asmdata so the lookup is a no-op),
+      and creates a fresh AB_EXTERNAL entry for cross-unit references.
+      AB_LOCAL syms are left alone -- pass 1 of the outer routine handles
+      label definitions via getjumplabel. }
+    function thaw_asm_extern_symbol(s: tasmsymbol): tasmsymbol;
+      begin
+        if not assigned(s) then
+          exit(nil);
+        if s.bind=AB_LOCAL then
+          exit(s);
+        result:=current_asmdata.RefAsmSymbol(s.name,s.typ,
+          s.bind in [AB_EXTERNAL_INDIRECT,AB_INDIRECT]);
+      end;
+
+
+    { Internal: rename body-local labels and re-resolve external asmsymbols
+      in a single tasmnode's tasmlist. Two passes:
+        Pass 1: every label DEFINITION (ait_label / tai_label.labsym whose
+          bind=AB_LOCAL) gets a fresh tasmlabel from current_asmdata.getjumplabel.
+          Old name -> new label mapped via labmap so multiple definitions of
+          the same name within one body share a single fresh label.
+        Pass 2: every operand-side / ait_const symbol reference is either
+          rewritten via labmap (body-local label) or re-resolved against
+          current_asmdata (external sym -- thaw_asm_extern_symbol). Both
+          paths are safe under nil pointers because the previous splice
+          could have left them so. }
     procedure clone_one_asmnode_labels(an: tasmnode);
       var
         hp        : tai;
@@ -544,8 +579,9 @@ implementation
         i         : longint;
         labmap    : TFPHashList;
         newlab    : tasmlabel;
-        oldlab    : tasmlabel;
+        oldlab    : tasmsymbol;
         existing  : pointer;
+        oldsym    : tasmsymbol;
       begin
         if not assigned(an) or not assigned(an.p_asm) then
           exit;
@@ -587,21 +623,49 @@ implementation
                   begin
                     ai:=tai_cpu_abstract(hp);
                     for i:=0 to ai.ops-1 do
-                      if (ai.oper[i]^.typ=top_ref) and
-                         assigned(ai.oper[i]^.ref^.symbol) then
+                      if (ai.oper[i]^.typ=top_ref) then
                         begin
-                          existing:=labmap.Find(ai.oper[i]^.ref^.symbol.name);
-                          if assigned(existing) then
-                            ai.oper[i]^.ref^.symbol:=tasmsymbol(existing);
+                          oldsym:=ai.oper[i]^.ref^.symbol;
+                          if assigned(oldsym) then
+                            begin
+                              existing:=labmap.Find(oldsym.name);
+                              if assigned(existing) then
+                                ai.oper[i]^.ref^.symbol:=tasmsymbol(existing)
+                              else
+                                ai.oper[i]^.ref^.symbol:=thaw_asm_extern_symbol(oldsym);
+                            end;
+                          oldsym:=ai.oper[i]^.ref^.relsymbol;
+                          if assigned(oldsym) then
+                            begin
+                              existing:=labmap.Find(oldsym.name);
+                              if assigned(existing) then
+                                ai.oper[i]^.ref^.relsymbol:=tasmsymbol(existing)
+                              else
+                                ai.oper[i]^.ref^.relsymbol:=thaw_asm_extern_symbol(oldsym);
+                            end;
                         end;
                   end;
                 ait_const:
-                  if assigned(tai_const(hp).sym) then
-                    begin
-                      existing:=labmap.Find(tai_const(hp).sym.name);
-                      if assigned(existing) then
-                        tai_const(hp).sym:=tasmsymbol(existing);
-                    end;
+                  begin
+                    oldsym:=tai_const(hp).sym;
+                    if assigned(oldsym) then
+                      begin
+                        existing:=labmap.Find(oldsym.name);
+                        if assigned(existing) then
+                          tai_const(hp).sym:=tasmsymbol(existing)
+                        else
+                          tai_const(hp).sym:=thaw_asm_extern_symbol(oldsym);
+                      end;
+                    oldsym:=tai_const(hp).endsym;
+                    if assigned(oldsym) then
+                      begin
+                        existing:=labmap.Find(oldsym.name);
+                        if assigned(existing) then
+                          tai_const(hp).endsym:=tasmsymbol(existing)
+                        else
+                          tai_const(hp).endsym:=thaw_asm_extern_symbol(oldsym);
+                      end;
+                  end;
                 else
                   ;
               end;
@@ -626,6 +690,66 @@ implementation
         if not assigned(n) then
           exit;
         foreachnodestatic(n,@clone_asm_labels_visitor,nil);
+      end;
+
+
+    { Freezes every tasmsymbol pointer reachable from an asmnode's tai chain
+      into the process-global pool (aasmbase.freeze_inline_asm_symbol). After
+      this, the tai entries no longer reference the providing unit's
+      about-to-be-destroyed asmdata. The pool entries carry name+bind+typ;
+      thaw_asm_extern_symbol recovers a real consumer-side symbol at every
+      splice. labels (AB_LOCAL) are frozen too so a later inline_clone_asm_labels
+      pass can still match them by name. }
+    procedure freeze_one_asmnode(an: tasmnode);
+      var
+        hp : tai;
+        ai : tai_cpu_abstract;
+        i  : longint;
+      begin
+        if not assigned(an) or not assigned(an.p_asm) then
+          exit;
+        hp:=tai(an.p_asm.first);
+        while assigned(hp) do
+          begin
+            case hp.typ of
+              ait_label:
+                tai_label(hp).labsym:=tasmlabel(freeze_inline_asm_symbol(tai_label(hp).labsym));
+              ait_const:
+                begin
+                  tai_const(hp).sym:=freeze_inline_asm_symbol(tai_const(hp).sym);
+                  tai_const(hp).endsym:=freeze_inline_asm_symbol(tai_const(hp).endsym);
+                end;
+              ait_instruction:
+                begin
+                  ai:=tai_cpu_abstract(hp);
+                  for i:=0 to ai.ops-1 do
+                    if ai.oper[i]^.typ=top_ref then
+                      begin
+                        ai.oper[i]^.ref^.symbol:=freeze_inline_asm_symbol(ai.oper[i]^.ref^.symbol);
+                        ai.oper[i]^.ref^.relsymbol:=freeze_inline_asm_symbol(ai.oper[i]^.ref^.relsymbol);
+                      end;
+                end;
+              else
+                ;
+            end;
+            hp:=tai(hp.next);
+          end;
+      end;
+
+
+    function freeze_asm_visitor(var n: tnode; arg: pointer): foreachnoderesult;
+      begin
+        result:=fen_true;
+        if n.nodetype=asmn then
+          freeze_one_asmnode(tasmnode(n));
+      end;
+
+
+    procedure freeze_inline_asm_body(n: tnode);
+      begin
+        if not assigned(n) then
+          exit;
+        foreachnodestatic(n,@freeze_asm_visitor,nil);
       end;
 
 

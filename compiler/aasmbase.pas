@@ -255,6 +255,28 @@ interface
 
     function ApplyAsmSymbolRestrictions(const s: ansistring): ansistring;
 
+    { Process-global pool of "frozen" tasmsymbol entries used to keep symbol
+      identities (name + bind + typ) alive across a per-module asmdata.free.
+      Inline-asm bodies stored on tprocdef.inlininginfo^.code reference
+      tasmsymbol pointers that originally lived in the providing unit's
+      asmdata. That asmdata is destroyed at end_of_parsing, leaving the body
+      with dangling pointers that crash any later splice (cross-unit, or
+      .ppu round-trip). The pool gives those pointers a permanent home:
+
+        * freeze_inline_asm_symbol(s) -- called at end_of_parsing, replaces
+          a still-valid asmdata-owned tasmsymbol with a name-keyed pool
+          entry. The pool entry lives until the compiler exits.
+        * lookup_inline_asm_pool_by_name -- called from PPU getasmsymbol to
+          re-create the same identity on cross-run loads.
+        * thaw is performed at splice time inside nbas.clone_one_asmnode_labels:
+          for each non-AB_LOCAL pool entry, current_asmdata.RefAsmSymbol
+          rebinds to a real consumer-side symbol; AB_LOCAL pool entries are
+          left alone -- the existing label-rename pass replaces them with
+          fresh getjumplabel results. }
+    function freeze_inline_asm_symbol(s: TAsmSymbol): TAsmSymbol;
+    function lookup_inline_asm_pool_by_name(const aname: TSymStr;
+      abind: TAsmsymbind; atyp: TAsmsymtype): TAsmSymbol;
+
     { dummy default noop callback }
     procedure default_global_used;
 
@@ -271,6 +293,32 @@ implementation
 
     uses
       verbose,fpchash;
+
+    var
+      inline_asm_symbol_pool: TFPHashObjectList = nil;
+
+    function lookup_inline_asm_pool_by_name(const aname: TSymStr;
+      abind: TAsmsymbind; atyp: TAsmsymtype): TAsmSymbol;
+      var
+        hp: TAsmSymbol;
+      begin
+        if not assigned(inline_asm_symbol_pool) then
+          inline_asm_symbol_pool := TFPHashObjectList.Create(true);
+        hp := TAsmSymbol(inline_asm_symbol_pool.Find(aname));
+        if not assigned(hp) then
+          hp := TAsmSymbol.Create(inline_asm_symbol_pool, aname, abind, atyp);
+        result := hp;
+      end;
+
+    function freeze_inline_asm_symbol(s: TAsmSymbol): TAsmSymbol;
+      begin
+        if not assigned(s) then
+          exit(nil);
+        if s.OwnerList = inline_asm_symbol_pool then
+          exit(s);
+        result := lookup_inline_asm_pool_by_name(s.Name, s.bind, s.typ);
+      end;
+
 
 
     function create_smartlink_sections:boolean;inline;

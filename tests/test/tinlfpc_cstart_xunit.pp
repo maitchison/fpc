@@ -12,12 +12,21 @@
   in inline_clone_asm_labels (DOSBox) and corrupted external-symbol names
   in the .o files (Win32 cross-compile).
 
-  Post-fix (compiler/ncal.pas:check_inlining): cross-unit asm-inline is
-  rejected with a clear diagnostic and the call site falls back to a
-  normal CALL. Same-unit asm-inline is unaffected (see
-  tinlfpc_cstart_inline). Once tcompilerppufile.putasmsymbol /
-  getasmsymbol round-trip the symbol via mangled name, this gate can be
-  loosened.
+  Post-fix:
+    * tcompilerppufile.putasmsymbol/getasmsymbol now round-trip name +
+      bind + typ via aasmbase.lookup_inline_asm_pool_by_name, a
+      process-global pool of stable TAsmSymbol identities (symtype.pas).
+    * pmodules.finish_unit calls nbas.freeze_inline_asm_body on every
+      pio_inline_asm procdef in the unit BEFORE module.end_of_parsing
+      drops its asmdata, replacing the body's about-to-dangle pointers
+      with the same pool entries the cross-run case sees.
+    * nbas.clone_one_asmnode_labels at splice time runs each non-AB_LOCAL
+      pool entry through current_asmdata.RefAsmSymbol so the consumer
+      gets a real AB_EXTERNAL reference; AB_LOCAL pool entries fall
+      through to the existing label-rename path which substitutes a
+      fresh getjumplabel result.
+  Cross-unit asm-inline now actually inlines instead of falling back to
+  CALL.
 
   Test: program compiles cleanly (no SIGSEGV, no internalerror, no
   undefined-symbol error from the linker), runs, and observes the timer
