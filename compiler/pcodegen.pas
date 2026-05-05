@@ -115,6 +115,16 @@ interface
 
     function pcodegen_find(pd: tprocdef): tpcodegen_proc_entry;
 
+    { Lookup helper for the asm reader: if `ident' (case-insensitive)
+      matches a codegen param of `pd', returns true and sets the
+      param's byte width + the auto-generated patch-site label name.
+      Returns false otherwise. The label name is `cg_<paramname>'
+      (the same name the preprocessor injects via `label cg_<p>;'). }
+    function pcodegen_match_param(pd: tprocdef;
+                                  const ident: string;
+                                  out type_size: longint;
+                                  out label_name: shortstring): boolean;
+
 implementation
 
     uses
@@ -151,6 +161,32 @@ implementation
           if tpcodegen_proc_entry(entries[i]).procdef = pd then
             begin
               result := tpcodegen_proc_entry(entries[i]);
+              exit;
+            end;
+      end;
+
+    function pcodegen_match_param(pd: tprocdef;
+                                  const ident: string;
+                                  out type_size: longint;
+                                  out label_name: shortstring): boolean;
+      var
+        e: tpcodegen_proc_entry;
+        i: longint;
+      begin
+        result := false;
+        type_size := 0;
+        label_name := '';
+        if pd = nil then
+          exit;
+        e := pcodegen_find(pd);
+        if e = nil then
+          exit;
+        for i := 0 to high(e.params) do
+          if SameText(ident, e.params[i].param_name) then
+            begin
+              type_size := e.params[i].type_size;
+              label_name := 'cg_' + e.params[i].param_name;
+              result := true;
               exit;
             end;
       end;
@@ -201,12 +237,12 @@ implementation
         end;
       end;
 
-    function label_name(const param_name: shortstring): shortstring;
+    function label_name_for(const param_name: shortstring): shortstring;
       begin
         result := 'cg_' + param_name;
       end;
 
-    function cache_name(const param_name: shortstring): shortstring;
+    function cache_name_for(const param_name: shortstring): shortstring;
       begin
         result := 'cg_last_' + param_name;
       end;
@@ -367,7 +403,7 @@ implementation
           begin
             if i > 0 then
               ppreproc_emit_punct(buf, _COMMA);
-            ppreproc_emit_ident(buf, label_name(entry.params[i].param_name));
+            ppreproc_emit_ident(buf, label_name_for(entry.params[i].param_name));
           end;
         ppreproc_emit_punct(buf, _SEMICOLON);
       end;
@@ -386,7 +422,7 @@ implementation
         for i := 0 to high(entry.params) do
           begin
             ps := entry.params[i];
-            ppreproc_emit_ident(buf, cache_name(ps.param_name));
+            ppreproc_emit_ident(buf, cache_name_for(ps.param_name));
             ppreproc_emit_punct(buf, _COLON);
             ppreproc_emit_ident(buf, pcodegen_size_typename(ps.type_size));
             ppreproc_emit_punct(buf, _EQ);
@@ -412,8 +448,8 @@ implementation
         for i := 0 to high(entry.params) do
           begin
             ps := entry.params[i];
-            ln := label_name(ps.param_name);
-            cn := cache_name(ps.param_name);
+            ln := label_name_for(ps.param_name);
+            cn := cache_name_for(ps.param_name);
             ptn := pcodegen_size_ptype(ps.type_size);
 
             ppreproc_emit_keyword(buf, _IF);
@@ -423,11 +459,21 @@ implementation
             ppreproc_emit_keyword(buf, _THEN);
             ppreproc_emit_keyword(buf, _BEGIN);
 
-            { P<sz>(@<label>)^ := p; }
+            { (P<sz>(@<label>) - 1)^ := p; -- the label is emitted
+              by the asm reader IMMEDIATELY AFTER the patched
+              instruction (i.e. one step PAST the imm bytes), so we
+              back up by 1 P<sz> stride to land on the patch byte(s).
+              PByte stride = 1 byte; PWord = 2; PLongint = 4 -- so
+              `PType(@cg_p) - 1' lands on the imm of the matching
+              width. }
+            ppreproc_emit_punct(buf, _LKLAMMER);
             ppreproc_emit_ident(buf, ptn);
             ppreproc_emit_punct(buf, _LKLAMMER);
             ppreproc_emit_punct(buf, _KLAMMERAFFE);
             ppreproc_emit_ident(buf, ln);
+            ppreproc_emit_punct(buf, _RKLAMMER);
+            ppreproc_emit_punct(buf, _MINUS);
+            ppreproc_emit_intliteral(buf, 1);
             ppreproc_emit_punct(buf, _RKLAMMER);
             ppreproc_emit_punct(buf, _CARET);
             ppreproc_emit_punct(buf, _ASSIGNMENT);

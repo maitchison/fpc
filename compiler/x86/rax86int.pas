@@ -94,6 +94,13 @@ Unit Rax86int;
          prevasmtoken : tasmtoken;
          ActOpsize : topsize;
          inexpression : boolean;
+         { feature/codegen-proc: when an operand resolves to a
+           codegen-param ident, the asm reader queues a label name
+           here. After the current instruction is concatenated to
+           the output list, the label is emitted right after, so the
+           Pascal-level prologue's `@cg_<p>' resolves to the byte
+           position immediately FOLLOWING the patched immediate. }
+         pending_codegen_label : shortstring;
          { %if family conditional stack, top of stack at high(pctifstack) }
          pctifstack : array of tpctifstate;
          constructor create;override;
@@ -159,7 +166,11 @@ Unit Rax86int;
        { register allocator }
        rautils,itx86int,
        { codegen }
-       procinfo,paramgr
+       procinfo,paramgr,
+       { feature/codegen-proc -- recognise codegen-param idents in
+         immediate operand position; auto-emit `cg_<p>:' label after
+         the instruction so the preprocessor's prologue can patch it }
+       pcodegen
        ;
 
     type
@@ -2374,6 +2385,8 @@ Unit Rax86int;
         toffset,
         tsize   : tcgint;
         hastypecast: boolean;
+        cgp_size: longint;          { feature/codegen-proc: imm width }
+        cgp_label: shortstring;     { feature/codegen-proc: label name }
 
       begin
         oper.vopext := 0;
@@ -2572,6 +2585,45 @@ Unit Rax86int;
                 { or a procedure (such as in CALL ID)      }
                 else
                  Begin
+                   { feature/codegen-proc: codegen-param ident in
+                     immediate operand position?  Replace with imm=0
+                     and queue a `cg_<p>:' label to emit after the
+                     instruction. Only fires when the operand slot
+                     is fresh (OPR_NONE) -- a partial reference
+                     expression keeps its existing semantics. }
+                   if (oper.opr.typ = OPR_NONE) and
+                      assigned(current_procinfo) and
+                      pcodegen_match_param(current_procinfo.procdef,
+                                           actasmpattern_origcase,
+                                           cgp_size, cgp_label) then
+                    Begin
+                      oper.opr.typ := OPR_CONSTANT;
+                      { Placeholder value: the encoder selects the imm
+                        encoding form by checking whether the value
+                        fits in a signed imm8 (aasmcpu.pas around the
+                        `OT_IMM8 or OT_SIGNED' branch). For width-1
+                        operands (e.g. `shl r, imm8') only the imm8
+                        form exists; val=0 is fine. For wider operands
+                        we need a value OUTSIDE [-128, +127] so the
+                        encoder picks the wider form (otherwise
+                        `imul r,r,longint' degrades to the 3-byte
+                        `imul r,r,imm8' encoding and our patch
+                        overwrites the wrong bytes). $80000000 picked
+                        because it never matches any user value the
+                        first call could legitimately reuse, making
+                        the cache-vs-placeholder compare fire on
+                        first call regardless of the user's value. }
+                      if cgp_size = 1 then
+                        oper.opr.val := 0
+                      else
+                        oper.opr.val := aint($80000000);
+                      oper.hastype := true;
+                      oper.typesize := cgp_size;
+                      oper.SetSize(cgp_size, true);
+                      pending_codegen_label := cgp_label;
+                      Consume(AS_ID);
+                    end
+                   else
                    { is it a constant ? }
                    if SearchIConstant(actasmpattern,l) then
                     Begin
@@ -3398,6 +3450,7 @@ Unit Rax86int;
       Message1(asmr_d_start_reading,'intel');
       inexpression:=FALSE;
       firsttoken:=TRUE;
+      pending_codegen_label:='';
      { sets up all opcode and register tables in uppercase
        done in the constructor now
       if not _asmsorted then
@@ -3550,6 +3603,22 @@ Unit Rax86int;
                   ConcatInstruction(curlist);
                 end;
               instr.Free;
+              { feature/codegen-proc: if BuildOperand queued a patch-
+                site label, emit it now -- right after the encoded
+                instruction. The label thus marks the byte position
+                IMMEDIATELY FOLLOWING the imm bytes (the imm sits at
+                the tail of the encoded form for shl/imul/mov-imm/
+                add-imm/etc.). The Pascal-level prologue takes the
+                address as `@cg_<p>' and subtracts the imm width to
+                reach the patch byte. }
+              if pending_codegen_label <> '' then
+                begin
+                  if SearchLabel(upper(pending_codegen_label), hl, true) then
+                    ConcatLabel(curlist, hl)
+                  else
+                    Message1(asmr_e_unknown_label_identifier, pending_codegen_label);
+                  pending_codegen_label := '';
+                end;
             end;
 
           AS_SEPARATOR :
