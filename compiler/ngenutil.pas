@@ -986,7 +986,14 @@ implementation
           varalign:=var_align(wantedalign);
           if (explicitalign>varalign) then
             begin
-              Message1(scanner_w_alignment_larger_than_max,sym.name);
+              { Only warn when the request truly exceeds what the target
+                can honour. var_align(wantedalign) is clamped to varalignmax
+                via the type's natural alignment, so explicitalign>varalign
+                may still be <= varalignmax (e.g. `array[..] of word align 8`
+                on go32v2: wantedalign=2, explicitalign=8, varalignmax=8 —
+                the BSS section honours 8 via per-section COFF flags). }
+              if (explicitalign>current_settings.alignment.varalignmax) then
+                Message1(scanner_w_alignment_larger_than_max,sym.name);
               varalign:=explicitalign;
             end
           else if (wantedalign>varalign) and (target_info.alignment.varalignmax>1) then
