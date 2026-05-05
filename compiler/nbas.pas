@@ -409,12 +409,43 @@ interface
          contained inside `n`. }
        procedure inline_clone_asm_labels(n: tnode);
 
+       { True iff `op` is a top_local operand referring to a parameter whose
+         callee-side paraloc is a single integer register. Used both at gate
+         time (asmnode_inline_safe in psub.pas) to accept the operand kind
+         and at splice time (inline_resolve_asm_paralocals below) to know
+         which top_locals to rewrite. The resolved register is returned in
+         `reg`; `reg`=NR_NO when the predicate is false.
+
+         Why this is safe: the v2(c) hook in ncal.pas's pass1_inline already
+         emits a tregcapturenode(rcd_load) before the spliced body that puts
+         every register-cc para's runtime value into its calleeside ABI
+         register. So at body-entry the param's home register holds the
+         value, and rewriting a `mov ebx, slot` (top_local for slot) into
+         `mov ebx, eax` (top_reg of slot's home) reads the correct value.
+
+         Tight predicate -- only matches operands that map cleanly to a
+         single-register read of the param value: localsymofs=0, no index
+         reg, no localforceref/localgetoffset (those are for memory-form
+         and lea-style accesses that have no register equivalent), value/
+         const para (not var/out), 1/2/4-byte size, hidden paras excluded. }
+       function inline_asm_top_local_is_register_param(const op: toper; out reg: tregister): boolean;
+
+       { Splice-time companion to inline_clone_asm_labels: walks the cloned
+         asm bodies and rewrites each top_local accepted by the predicate
+         above to top_reg of the param's calleeside register. Run after
+         inline_clone_asm_labels at every inline-asm splice site -- without
+         it, top_local operands would survive into the caller's tasmlist
+         and reach codegen, which would emit a [base+offset] memory ref
+         using the *caller's* stack frame, not the callee's parameter. }
+       procedure inline_resolve_asm_paralocals(n: tnode);
+
 implementation
 
     uses
       verbose,globals,systems,
       cclasses,
       aasmbase,
+      cpubase,parabase,
       ppu,
       symsym,symconst,symdef,defutil,defcmp,
       pass_1,
@@ -423,7 +454,6 @@ implementation
 {$ifdef DEBUG_NODE_XML}
 {$ifndef jvm}
       ,
-      cpubase,
       cutils,
 {$ifdef arm}
       agarmgas, { Needed for gas_shiftmode2str }
@@ -596,6 +626,96 @@ implementation
         if not assigned(n) then
           exit;
         foreachnodestatic(n,@clone_asm_labels_visitor,nil);
+      end;
+
+
+    function inline_asm_top_local_is_register_param(const op: toper; out reg: tregister): boolean;
+      var
+        pvs : tparavarsym;
+        loc : pcgparalocation;
+      begin
+        result:=false;
+        reg:=NR_NO;
+        if op.typ<>top_local then
+          exit;
+        if not assigned(op.localoper) then
+          exit;
+        if op.localoper^.localsymofs<>0 then
+          exit;
+        if op.localoper^.localindexreg<>NR_NO then
+          exit;
+        if op.localoper^.localforceref then
+          exit;
+        if op.localoper^.localgetoffset then
+          exit;
+        if not assigned(op.localoper^.localsym) then
+          exit;
+        if not (tobject(op.localoper^.localsym) is tparavarsym) then
+          exit;
+        pvs:=tparavarsym(op.localoper^.localsym);
+        if vo_is_hidden_para in pvs.varoptions then
+          exit;
+        if not (pvs.varspez in [vs_value,vs_const]) then
+          exit;
+        if not assigned(pvs.vardef) then
+          exit;
+        if not (pvs.vardef.size in [1,2,4]) then
+          exit;
+        loc:=pvs.paraloc[calleeside].location;
+        if not assigned(loc) then
+          exit;
+        if assigned(loc^.next) then
+          exit;
+        if not (loc^.loc in [LOC_REGISTER,LOC_CREGISTER]) then
+          exit;
+        if getregtype(loc^.register)<>R_INTREGISTER then
+          exit;
+        reg:=loc^.register;
+        result:=true;
+      end;
+
+
+    { Pass 3 of the splice-time fixup: every cloned asmnode's tasmlist gets a
+      walk that converts each accepted top_local operand into a top_reg of the
+      param's calleeside register. tai_cpu_abstract.loadreg handles freeing
+      the previous variant's owned data (the plocaloper) via clearop. }
+    procedure resolve_one_asmnode_paralocals(an: tasmnode);
+      var
+        hp  : tai;
+        ai  : tai_cpu_abstract;
+        i   : longint;
+        reg : tregister;
+      begin
+        if not assigned(an) or not assigned(an.p_asm) then
+          exit;
+        hp:=tai(an.p_asm.first);
+        while assigned(hp) do
+          begin
+            if hp.typ=ait_instruction then
+              begin
+                ai:=tai_cpu_abstract(hp);
+                for i:=0 to ai.ops-1 do
+                  if inline_asm_top_local_is_register_param(ai.oper[i]^,reg) then
+                    ai.loadreg(i,reg);
+              end;
+            hp:=tai(hp.next);
+          end;
+      end;
+
+
+    function resolve_asm_paralocals_visitor(var n: tnode; arg: pointer): foreachnoderesult;
+      begin
+        result:=fen_true;
+        if n.nodetype=asmn then
+          resolve_one_asmnode_paralocals(tasmnode(n));
+      end;
+
+
+    procedure inline_resolve_asm_paralocals(n: tnode);
+      begin
+        if not assigned(n) then
+          exit;
+        foreachnodestatic(n,@resolve_asm_paralocals_visitor,nil);
       end;
 
 

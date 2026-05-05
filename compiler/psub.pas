@@ -187,9 +187,10 @@ implementation
       also returns true. }
     function asmnode_inline_safe(p: tasmnode): boolean;
       var
-        hp : tai;
-        ai : tai_cpu_abstract;
-        i : longint;
+        hp  : tai;
+        ai  : tai_cpu_abstract;
+        i   : longint;
+        reg : tregister;
       begin
         result:=true;
         if asmnf_get_asm_position in p.asmnodeflags then
@@ -222,7 +223,18 @@ implementation
                         rename applied at call-site time. }
                       if ai.oper[i]^.typ in [top_none,top_reg,top_const,top_bool,top_ref] then
                         continue;
-                      { top_local + any non-x86 operand kind not whitelisted above }
+                      { top_local of a parameter whose calleeside paraloc is a
+                        single integer register: accepted here, then rewritten
+                        to top_reg of that register at splice time by
+                        inline_resolve_asm_paralocals (nbas.pas). The v2(c)
+                        hook in ncal.pas already loads the param's value into
+                        its home register before the spliced body runs, so
+                        every such symbol-by-name read maps cleanly to a
+                        register read of the home reg. }
+                      if inline_asm_top_local_is_register_param(ai.oper[i]^,reg) then
+                        continue;
+                      { top_local of a true local var, a stack-passed param,
+                        or any non-x86 operand kind not whitelisted above. }
                       exit(false);
                     end;
                 end;
