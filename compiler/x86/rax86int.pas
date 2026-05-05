@@ -2387,6 +2387,7 @@ Unit Rax86int;
         hastypecast: boolean;
         cgp_size: longint;          { feature/codegen-proc: imm width }
         cgp_label: shortstring;     { feature/codegen-proc: label name }
+        cgp_kind: tpcodegen_kind;   { feature/codegen-proc: imm vs ptr }
 
       begin
         oper.vopext := 0;
@@ -2585,41 +2586,59 @@ Unit Rax86int;
                 { or a procedure (such as in CALL ID)      }
                 else
                  Begin
-                   { feature/codegen-proc: codegen-param ident in
-                     immediate operand position?  Replace with imm=0
-                     and queue a `cg_<p>:' label to emit after the
-                     instruction. Only fires when the operand slot
-                     is fresh (OPR_NONE) -- a partial reference
-                     expression keeps its existing semantics. }
+                   { feature/codegen-proc: codegen-param ident.
+                     - cgk_imm:  ordinal byte/word/longint used as
+                                 instruction immediate. Replace with
+                                 OPR_CONSTANT(placeholder) + label
+                                 after, so the prologue can patch the
+                                 imm bytes.
+                     - cgk_ptr:  pointer used as memory-reference base
+                                 address (`p[ebx*2]'). Set up an
+                                 OPR_REFERENCE with disp32 placeholder;
+                                 any subsequent `[...]' modifies index/
+                                 scale via the existing BuildReference
+                                 path.
+                     Only fires when the operand slot is fresh
+                     (OPR_NONE) -- a partial reference expression
+                     keeps its existing semantics. }
                    if (oper.opr.typ = OPR_NONE) and
                       assigned(current_procinfo) and
                       pcodegen_match_param(current_procinfo.procdef,
                                            actasmpattern_origcase,
-                                           cgp_size, cgp_label) then
+                                           cgp_kind, cgp_size, cgp_label) then
                     Begin
-                      oper.opr.typ := OPR_CONSTANT;
-                      { Placeholder value: the encoder selects the imm
-                        encoding form by checking whether the value
-                        fits in a signed imm8 (aasmcpu.pas around the
-                        `OT_IMM8 or OT_SIGNED' branch). For width-1
-                        operands (e.g. `shl r, imm8') only the imm8
-                        form exists; val=0 is fine. For wider operands
-                        we need a value OUTSIDE [-128, +127] so the
-                        encoder picks the wider form (otherwise
-                        `imul r,r,longint' degrades to the 3-byte
-                        `imul r,r,imm8' encoding and our patch
-                        overwrites the wrong bytes). $80000000 picked
-                        because it never matches any user value the
-                        first call could legitimately reuse, making
-                        the cache-vs-placeholder compare fire on
-                        first call regardless of the user's value. }
-                      if cgp_size = 1 then
-                        oper.opr.val := 0
+                      if cgp_kind = cgk_ptr then
+                        Begin
+                          { Memory ref with disp32 = $80000000
+                            placeholder. No symbol -- the linker would
+                            choke on an undefined relocation. The
+                            placeholder forces the encoder to emit the
+                            full 32-bit displacement form. }
+                          oper.InitRef;
+                          oper.opr.ref.offset := aint($80000000);
+                        end
                       else
-                        oper.opr.val := aint($80000000);
-                      oper.hastype := true;
-                      oper.typesize := cgp_size;
-                      oper.SetSize(cgp_size, true);
+                        Begin
+                          oper.opr.typ := OPR_CONSTANT;
+                          { Placeholder value: the encoder selects the
+                            imm encoding form by checking whether the
+                            value fits in a signed imm8 (aasmcpu.pas
+                            around `OT_IMM8 or OT_SIGNED'). For width-1
+                            operands (`shl r, imm8') only the imm8
+                            form exists; val=0 is fine. For wider
+                            operands we need a value OUTSIDE [-128,
+                            +127] so the encoder picks the wider form
+                            (otherwise `imul r,r,longint' degrades to
+                            the 3-byte `imul r,r,imm8' encoding and our
+                            patch overwrites the wrong bytes). }
+                          if cgp_size = 1 then
+                            oper.opr.val := 0
+                          else
+                            oper.opr.val := aint($80000000);
+                          oper.hastype := true;
+                          oper.typesize := cgp_size;
+                          oper.SetSize(cgp_size, true);
+                        end;
                       pending_codegen_label := cgp_label;
                       Consume(AS_ID);
                     end
