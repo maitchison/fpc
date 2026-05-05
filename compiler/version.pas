@@ -26,18 +26,25 @@ unit version;
 interface
 
     const
-       { version string. patch_nr is a string so it can hold multi-digit
-         values like '10'; the numeric counterparts below are what
-         arithmetic (wordversion, the deploy units stamp) reads from. }
+       { Version string. We bump patch_nr (the third digit) ONLY when the
+         on-disk PPU format changes -- a hard incompatibility that forces
+         every consumer to recompile. minorpatch is appended for
+         non-breaking compiler bumps that keep the same PPU format, e.g.
+         a parser feature, a codegen tweak, or a pure IDE change; it lets
+         the same X:\fpc\units\<ver>\ tree be shared across the suffix
+         lineage without invalidating older binaries.
+
+         patch_nr is a string so multi-digit stamps like '10' work; the
+         numeric mirrors below feed the wordversion arithmetic. }
        version_nr = '3';
        release_nr = '3';
-       patch_nr   = '10';
+       patch_nr   = '6';
        minorpatch = '';
 
        { numeric mirrors of the strings above. Keep synced. }
        version_nr_int = 3;
        release_nr_int = 3;
-       patch_nr_int   = 10;
+       patch_nr_int   = 6;
 
        { word version for ppu file }
        wordversion = (version_nr_int shl 14)+
