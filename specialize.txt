@@ -74,12 +74,20 @@ the runtime value misses the set, behaviour matches Pascal's normal
 ## Syntax
 
     param-name : type SPECIALIZE [ set-literal ]
+    param-name : boolean SPECIALIZE              { shortcut, expands to [false, true] }
 
 Where set-literal is a regular Pascal set constructor:
 
     [ 1, 4, 8 ]            { enumerated literal }
     [ 0..3 ]               { dense range }
     [ 0, 2, 4..7 ]         { hybrid }
+
+The boolean shortcut omits the bracket list entirely: when the
+parameter type is `boolean' (any pasbool/bytebool/wordbool/longbool
+flavour), the set is auto-filled to {false, true}. Equivalent to
+writing `specialize [false, true]' explicitly. The shortcut is
+boolean-only -- enums and integer subranges still require an
+explicit set so the user picks the value space deliberately.
 
 Constraints (compile-time-checked):
 
