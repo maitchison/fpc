@@ -111,7 +111,8 @@ implementation
        syscinfo,
        pbase,pexpr,ptype,pdecl,pparautl,pgenutil,
        ppreproc,
-       pspecset
+       pspecset,
+       pcodegen
 {$ifdef jvm}
        ,pjvm
 {$endif}

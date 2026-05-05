@@ -199,6 +199,7 @@ type
     _WINAPI,
     _ASMNAME,
     _BASEREG,
+    _CODEGEN,
     _CPPDECL,
     _DEFAULT,
     _DYNAMIC,
@@ -546,6 +547,7 @@ const
       (str:'WINAPI'        ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'ASMNAME'       ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'BASEREG'       ;special:false;keyword:[m_none];op:NOTOKEN),   { Syscall variation on Amiga-likes }
+      (str:'CODEGEN'       ;special:false;keyword:[m_none];op:NOTOKEN),   { feature/codegen-proc parameter modifier }
       (str:'CPPDECL'       ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'DEFAULT'       ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'DYNAMIC'       ;special:false;keyword:[m_none];op:NOTOKEN),
