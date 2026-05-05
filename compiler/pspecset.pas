@@ -75,6 +75,16 @@ interface
       such params (degenerate). }
     function pspecset_total_count(entry: tpspecset_proc_entry): longint;
 
+    { True if `pi' is currently parsing a procdef that has a registered
+      specialize-set sidecar AND `paraname' matches one of its
+      specialize-set params. Used by the asm reader's %if evaluator to
+      treat references to such params as placeholder 0 during the
+      original-body capture (the real value materialises as a
+      wrapper-local const when the body is replayed per specialisation).
+      `pi' is `tobject' so the asm reader's `tprocinfo' fits without
+      forcing an extra unit dependency on the caller side. }
+    function pspecset_is_capture_para(pi: tobject; const paraname: shortstring): boolean;
+
     const
       { Hard cap on total specialisations across the cartesian
         product of all specialize-set params on one proc. The spec
@@ -93,6 +103,7 @@ implementation
       scanner,
       pbase,
       pexpr,
+      procinfo,
       symbase,
       symsym,
       symconst,
@@ -162,6 +173,31 @@ implementation
         result := 1;
         for i := 0 to high(entry.params) do
           result := result * length(entry.params[i].values);
+      end;
+
+    function pspecset_is_capture_para(pi: tobject; const paraname: shortstring): boolean;
+      var
+        entry: tpspecset_proc_entry;
+        pd: tprocdef;
+        i: longint;
+      begin
+        result := false;
+        if not assigned(pi) then
+          exit;
+        if not (pi is tprocinfo) then
+          exit;
+        pd := tprocinfo(pi).procdef;
+        if not assigned(pd) then
+          exit;
+        entry := pspecset_find(pd);
+        if entry = nil then
+          exit;
+        for i := 0 to high(entry.params) do
+          if SameText(entry.params[i].param_name, paraname) then
+            begin
+              result := true;
+              exit;
+            end;
       end;
 
     { ============================================================
@@ -688,7 +724,8 @@ implementation
                            const emit_paras: array of tspecset_emit_param;
                            paras_count: longint;
                            body_buf: tppreproc_buf;
-                           param_def: tdef);
+                           param_def: tdef;
+                           emit_inline: boolean);
       var
         i: longint;
         first_para: boolean;
@@ -713,9 +750,19 @@ implementation
         ppreproc_emit_punct(buf, _RKLAMMER);
         ppreproc_emit_punct(buf, _SEMICOLON);
 
-        { inline directive }
-        ppreproc_emit_ident_as(buf, 'inline', _INLINE);
-        ppreproc_emit_punct(buf, _SEMICOLON);
+        { Inherit `inline;' from the source proc only. The dispatch stub is
+          always inline (that's what folds constant call sites); the wrapper
+          body might not be a candidate for inlining at all -- e.g. when the
+          source proc is `procedure foo(...); asm ... end;' or has any other
+          construct that triggers `pio_inline_not_possible'. Forcing inline
+          on every wrapper trips parser_n_not_supported_for_inline notes for
+          asm bodies and worse, leaves the asm reader / parser in a bad
+          state for subsequent declarations. }
+        if emit_inline then
+          begin
+            ppreproc_emit_ident_as(buf, 'inline', _INLINE);
+            ppreproc_emit_punct(buf, _SEMICOLON);
+          end;
 
         { const k = <v>; -- value form depends on the param's type so
           that boolean specialisations emit `const k = false;' instead
@@ -878,7 +925,13 @@ implementation
             emit_wrapper(inject_buf, wrapper_name,
                          param_entry.values[i], kname,
                          emit_paras, paras_count, entry.body_buf,
-                         param_entry.param_def);
+                         param_entry.param_def,
+                         { Only emit `inline;' on the wrapper if the user's
+                           source proc was declared inline. Asm-bodied procs
+                           and other inline-incompatible constructs aren't
+                           tagged inline by the user, so the wrapper stays
+                           a regular call. }
+                         po_inline in pd.procoptions);
           end;
 
         { The user's procsym was already renamed in SS-A; orig_name
