@@ -5,6 +5,34 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.23b / Compiler 3.3.9b ==
+
+  * `codegen-proc` parameter modifier (v5). A parameter declared
+    `codegen` lets the body of the proc emit a single inline-asm
+    template that the compiler patches per call site with the
+    actual operand of that argument. Both immediate and pointer
+    operands are supported, including memory-displacement patch
+    sites (e.g. `mov eax, [ebx + arg]`). One template, many
+    specialised emit sites -- no per-call thunk, no register
+    shuffling.
+
+  * `assembler; nostackframe; inline;` accepts cross-register
+    reads of register-cc parameters. Previously the body had to
+    consume each register-cc param from the register the calling
+    convention placed it in (eax/edx/ecx for the first three
+    integer args). Now the body may read `arg` from a different
+    register and the compiler rewrites the access at splice time.
+    Lets you write the body in whatever register layout suits the
+    instruction sequence rather than the cc.
+
+  * Quieter inline diagnostics. `-vy` no longer echoes a "Not
+    inlining ..." line for every call site of a proc the parser
+    already rejected once (self-recursion, pio_inline_not_possible,
+    missing inlining-info). Per-call-site diagnostics are now
+    reserved for site-specific reasons -- SCC defer, budget
+    exceeded, hidden-symbol cross-unit, unsafe param construct.
+
+
 == IDE 1.0.23a / Compiler 3.3.9a ==
 
   * New `specialize-set` parameter modifier. When a parameter
