@@ -5006,18 +5006,16 @@ implementation
               because at splice time current_procinfo.procdef is the
               CALLER, not the procdef being expanded -- a live
               comparison would not fire on the spliced inner call. }
+            { Self-recursion is a per-proc property, not a per-call-site
+              novelty -- emitting at every spliced copy and every direct
+              self-call is just noise. Suppress; the flag bookkeeping below
+              still fires so codegen behaves correctly. }
             if cnf_inline_blocked_self in callnodeflags then
-              begin
-                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
-                  '" at recursive site (cnf_inline_blocked_self)');
-                exit;
-              end;
+              exit;
             if assigned(current_procinfo) and
                (procdefinition=current_procinfo.procdef) then
               begin
                 include(callnodeflags,cnf_inline_blocked_self);
-                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
-                  '", direct self-recursion -- stamping cnf_inline_blocked_self so spliced copies stay as plain CALLs');
                 exit;
               end;
             { Indirect-cycle guard: the callee is already being spliced
@@ -5041,12 +5039,11 @@ implementation
               pio_inline_not_possible is the authoritative "do not splice
               this body" signal -- the existing check at the cg_n_no_inline
               site only suppressed the warning, not the splice itself. }
+            { pio_inline_not_possible was set at parse time; psub.pas/_no_inline
+              already emitted parser_n_not_supported_for_inline + _h_inlining_disabled
+              naming the exact construct. Don't re-announce per call site. }
             if pio_inline_not_possible in tprocdef(procdefinition).implprocoptions then
-              begin
-                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
-                  '", marked pio_inline_not_possible (see prior parser_n_not_supported_for_inline note)');
-                exit;
-              end;
+              exit;
             if not tprocdef(procdefinition).has_inlininginfo then
               begin
                 { SCC inline-deferral, slice 1: if the called procdef
@@ -5107,8 +5104,10 @@ implementation
                         exit;
                       end;
                   end;
-                Comment(V_lineinfo+V_Inline,'Not inlining "'+tprocdef(procdefinition).procsym.realname+
-                  '", body not stored (has_inlininginfo=false; check ppu / mode / parser_n_not_supported_for_inline)');
+                { No inlininginfo and we're not in the SCC-defer case --
+                  i.e. parser-time decision (pio_inline_not_possible, mode
+                  mismatch, or .ppu without body). Already explained at
+                  the declaration; skip the per-call-site echo. }
                 exit;
               end;
             if not heuristics_favors_inlining(nodecnt,nodelim) then
