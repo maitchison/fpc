@@ -321,6 +321,15 @@ implementation
         if not assigned(cpi.code) then
           begin reason:='no code tree (parser produced empty body)'; exit; end;
         pd:=current_procinfo.procdef;
+        { The gate runs in parse_body, which is BEFORE generate_code's
+          generate_parameter_info -- so funcretloc[calleeside] /
+          paraloc[calleeside] may still be uninitialised when we get here.
+          init_paraloc_info is idempotent; calling it now ensures the
+          paraloc_is_single_intreg checks below see real data instead of a
+          zero-initialised tcgpara record (where cgp.location is nil and
+          paraloc_is_single_intreg silently returns false, masking what
+          should be a valid asm-inline candidate). }
+        pd.init_paraloc_info(calleeside);
         if not is_void(pd.returndef) then
           begin
             if not paraloc_is_single_intreg(pd.funcretloc[calleeside]) then
