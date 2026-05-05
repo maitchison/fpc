@@ -5,7 +5,7 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
-== IDE 1.0.24 / Compiler 3.4.0 ==
+== IDE 1.0.24 / Compiler 3.3.10 ==
 
   * Cross-unit asm-inline now actually inlines instead of crashing
     the compiler or producing corrupt object files. A helper like
@@ -15,10 +15,10 @@ Help | What's new...
     dev/video, no more `Undefined symbol: <garbled>` from the
     linker. Same-unit asm-inline is unchanged.
 
-  * Version bump 3.3.9c -> 3.4.0 (and IDE 1.0.23c -> 1.0.24). The
+  * Version bump 3.3.9c -> 3.3.10 (and IDE 1.0.23c -> 1.0.24). The
     asm-inline fix changes the .ppu format, so the new compiler
     cannot load older .ppu files. Units now land under
-    `X:\fpc\units\340\` (the old `X:\fpc\units\339\` tree stays
+    `X:\fpc\units\3310\` (the old `X:\fpc\units\339\` tree stays
     intact for any 3.3.9-stamped install you still want to use).
 
 

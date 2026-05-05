@@ -26,16 +26,23 @@ unit version;
 interface
 
     const
-       { version string }
+       { version string. patch_nr is a string so it can hold multi-digit
+         values like '10'; the numeric counterparts below are what
+         arithmetic (wordversion, the deploy units stamp) reads from. }
        version_nr = '3';
-       release_nr = '4';
-       patch_nr   = '0';
+       release_nr = '3';
+       patch_nr   = '10';
        minorpatch = '';
 
+       { numeric mirrors of the strings above. Keep synced. }
+       version_nr_int = 3;
+       release_nr_int = 3;
+       patch_nr_int   = 10;
+
        { word version for ppu file }
-       wordversion = ((ord(version_nr)-ord('0')) shl 14)+
-                     ((ord(release_nr)-ord('0')) shl 7)+
-                     (ord(patch_nr)-ord('0'));
+       wordversion = (version_nr_int shl 14)+
+                     (release_nr_int shl 7)+
+                     patch_nr_int;
 
        { date string }
        date_string = {$I %DATE%};
