@@ -107,7 +107,17 @@ interface
           ST_LINE,
           ST_COLUMN,
           ST_FILEINDEX,
-          ST_LOADMESSAGES);
+          ST_LOADMESSAGES,
+          // specialize-set asm-body source-text capture marker.
+          // Followed by a longint length then `length' raw source bytes.
+          // Emitted by _asm_statement when the body of a specialize-set
+          // proc is being captured by ppreproc; the asm reader uses
+          // char-level asmgetchar reads that bypass scanner.recordtoken,
+          // so the asm body chars never enter the captured token stream
+          // unless we side-channel them through this marker. On replay
+          // the marker pushes the bytes through substitutemacro so the
+          // wrapper asmreader.assemble re-parses them naturally.
+          ST_ASM_SOURCE);
 
        { tscannerfile }
        tscannerfile = class
@@ -166,6 +176,17 @@ interface
 
           replaytokenbuf,
           recordtokenbuf : tdynamicarray;
+
+          // specialize-set asm-source side-channel: when asm_capture_active
+          // is true, every char advanced by asmgetchar is appended to
+          // asm_capture_buf. _asm_statement turns this on right before
+          // asmreader.assemble runs (only when current_procinfo is being
+          // captured by pspecset's body-capture) and turns it off on
+          // exit, then writes the collected bytes to recordtokenbuf as
+          // an ST_ASM_SOURCE marker so each per-value wrapper replays a
+          // fresh asm parse against the same source text.
+          asm_capture_active : boolean;
+          asm_capture_buf    : ansistring;
 
           { last settings we stored }
           last_settings : tsettings;
@@ -238,6 +259,19 @@ interface
           function is_recording_tokens:boolean;
           procedure replaytoken;
           procedure startreplaytokens(buf:tdynamicarray; change_endian:boolean);
+          // specialize-set asm-source capture: see asm_capture_active /
+          // asm_capture_buf field comment above. begin_specset_asm_capture
+          // is a no-op when no recordtokenbuf is active.
+          procedure begin_specset_asm_capture;
+          procedure end_specset_asm_capture;
+          // After the wrapper's asmreader.assemble runs against a synthetic
+          // input pushed by an ST_ASM_SOURCE replay marker, AS_END causes
+          // the reader to exit BEFORE the buffer is exhausted (only the
+          // lookahead char past `end' was read). Without an explicit pop,
+          // the synthetic stays on the input stack and leaks chars (#0
+          // terminator) into subsequent parsing. Returns true if a pop
+          // was performed.
+          function pop_specset_asm_source_if_active : boolean;
           { bit length asizeint is target depend }
           procedure tokenwritesizeint(val : asizeint);
           procedure tokenwritelongint(val : longint);
@@ -3083,6 +3117,8 @@ type
         nexttoken:=NOTOKEN;
         ignoredirectives:=TFPHashList.Create;
         change_endian_for_replay:=false;
+        asm_capture_active:=false;
+        asm_capture_buf:='';
         initwidestring(patternw);
       end;
 
@@ -3301,6 +3337,100 @@ type
     function tscannerfile.is_recording_tokens: boolean;
       begin
         result:=assigned(recordtokenbuf);
+      end;
+
+
+    // specialize-set asm-source capture lifecycle. begin_ seeds the
+    // capture buf with the current `c' (the char immediately after
+    // `asm', which the asm reader reads directly from current_scanner.c
+    // before any asmgetchar advance) so we don't drop the first char of
+    // the body; subsequent chars are captured by the asmgetchar hook.
+    // end_ writes ST_ASM_SOURCE + length-prefixed bytes to recordtokenbuf
+    // and resets the buf for the next capture (multiple asm blocks in
+    // one specset proc body are supported).
+    procedure tscannerfile.begin_specset_asm_capture;
+      begin
+        if not assigned(recordtokenbuf) then
+          exit;
+        if asm_capture_active then
+          exit;   // defensive: already capturing (shouldn't happen)
+        asm_capture_buf := c;
+        asm_capture_active := true;
+      end;
+
+
+    function tscannerfile.pop_specset_asm_source_if_active : boolean;
+      begin
+        result := false;
+        if not assigned(inputfile) then
+          exit;
+        if not inputfile.is_macro then
+          exit;
+        // The synthetic input pushed by ST_ASM_SOURCE is opened via
+        // `_Macro_.specset_asm' (see substitutemacro call site). Match by
+        // name so we don't accidentally pop an unrelated macro that
+        // happens to be on top.
+        if inputfile.name <> '_Macro_.specset_asm' then
+          exit;
+        // Reproduce reload's macro-pop sequence (line 4126+): close +
+        // nextfile + tempopen, then load the next char from the resumed
+        // file so subsequent reads are consistent.
+        gettokenpos;
+        closeinputfile;
+        if not assigned(inputfile.next) then
+          begin
+            c := #26;
+            result := true;
+            exit;
+          end;
+        nextfile;
+        tempopeninputfile;
+{$ifdef CHECK_INPUTPOINTER_LIMITS}
+        if assigned(hidden_inputpointer) then
+          begin
+            c := get_inputpointer_char;
+            inc_inputpointer;
+          end;
+{$else not CHECK_INPUTPOINTER_LIMITS}
+        if assigned(inputpointer) then
+          begin
+            c := inputpointer^;
+            inc(inputpointer);
+          end;
+{$endif CHECK_INPUTPOINTER_LIMITS}
+        result := true;
+      end;
+
+
+    procedure tscannerfile.end_specset_asm_capture;
+      var
+        gt : ttoken;
+        s : tspecialgenerictoken;
+        b : byte;
+        len : longint;
+      begin
+        if not asm_capture_active then
+          exit;
+        asm_capture_active := false;
+        if not assigned(recordtokenbuf) then
+          begin
+            asm_capture_buf := '';
+            exit;
+          end;
+        len := length(asm_capture_buf);
+        Comment(V_Debug, 'specset-asm: capture ' + tostr(len) +
+          ' bytes for replay');
+        // Write ST_ASM_SOURCE marker: _GENERICSPECIALTOKEN, then the
+        // special-token byte, then a length-prefixed byte payload.
+        gt := _GENERICSPECIALTOKEN;
+        writetoken(gt);
+        s := ST_ASM_SOURCE;
+        b := byte(s);
+        recordtokenbuf.write(b, 1);
+        tokenwritelongint(len);
+        if len > 0 then
+          recordtokenbuf.write(asm_capture_buf[1], len);
+        asm_capture_buf := '';
       end;
 
 
@@ -3821,6 +3951,8 @@ type
         pmsg,prevmsg : pmessagestaterecord;
         msgset : thashset;
         msgfound : boolean;
+        asm_src_len : longint;
+        asm_src_buf : ansistring;
       begin
         if not assigned(replaytokenbuf) then
           internalerror(200511177);
@@ -3982,6 +4114,27 @@ type
                       begin
                         current_tokenpos.fileindex:=tokenreadword;
                         current_filepos:=current_tokenpos;
+                      end;
+                    ST_ASM_SOURCE:
+                      begin
+                        // Decode the captured asm body bytes and push
+                        // them as a synthetic macro-input. The next
+                        // token returned to the caller is _ASM (already
+                        // queued behind this marker in the buffer); when
+                        // _asm_statement runs and asmreader.assemble
+                        // begins reading chars, it pulls them from this
+                        // synthetic input. After AS_END is hit the
+                        // remaining synthetic chars (the lookahead past
+                        // `end') drain via reload's macro-pop path so
+                        // control returns to the normal source.
+                        asm_src_len := tokenreadlongint;
+                        setlength(asm_src_buf, asm_src_len);
+                        if asm_src_len > 0 then
+                          replaytokenbuf.read(asm_src_buf[1], asm_src_len);
+                        substitutemacro('specset_asm', @asm_src_buf[1],
+                          asm_src_len, current_filepos.line,
+                          current_filepos.fileindex, true);
+                        asm_src_buf := '';
                       end;
                   end;
                 continue;
@@ -6945,6 +7098,14 @@ exit_label:
                end;
              else
                begin
+                 // Side-channel for specialize-set asm-source capture.
+                 // Append the char to the capture buf so pspecset can
+                 // replay it for each per-value wrapper. Disabled when
+                 // we're already replaying from a synthetic input (we
+                 // don't want to recapture the same chars on the way
+                 // back out).
+                 if asm_capture_active and not assigned(replaytokenbuf) then
+                   asm_capture_buf := asm_capture_buf + c;
                  asmgetchar:=c;
                  exit;
                end;
