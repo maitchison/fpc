@@ -5469,7 +5469,19 @@ type
       begin
         current_commentstyle:=comment_tp;
         if read_first_char then
-          readchar;
+          begin
+            readchar;
+            { specialize-set asm side-channel: chars consumed inside a
+              Pascal-style comment in an asm body must still appear in
+              asm_capture_buf, so the per-value wrapper replay sees a
+              synthetic source identical to the original user source.
+              Without this, the comment text is missing from the replay
+              and the unbalanced opening brace makes the wrapper asm
+              reader run skipcomment past EOF of the synthetic and into
+              the surrounding source. }
+            if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+              asm_capture_buf := asm_capture_buf + c;
+          end;
         inc_comment_level;
       { handle compiler switches }
         if (c='$') then
@@ -5487,6 +5499,8 @@ type
               if m_iso in current_settings.modeswitches then
                 begin
                   readchar;
+                  if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+                    asm_capture_buf := asm_capture_buf + c;
                   if c=')' then
                     dec_comment_level
                   else
@@ -5503,6 +5517,8 @@ type
               end;
            end;
            readchar;
+           if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+             asm_capture_buf := asm_capture_buf + c;
          end;
         current_commentstyle:=comment_none;
       end;
@@ -5513,12 +5529,18 @@ type
         current_commentstyle:=comment_delphi;
         inc_comment_level;
         readchar;
+        if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+          asm_capture_buf := asm_capture_buf + c;
         { this is not supported }
         if c='$' then
           Message(scan_w_wrong_styled_switch);
         { skip comment }
         while not (c in [#10,#13,#26]) do
-          readchar;
+          begin
+            readchar;
+            if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+              asm_capture_buf := asm_capture_buf + c;
+          end;
         dec_comment_level;
         current_commentstyle:=comment_none;
       end;
@@ -5533,7 +5555,11 @@ type
         { only load a char if last already processed,
           was cause of bug1634 PM }
         if read_first_char then
-          readchar;
+          begin
+            readchar;
+            if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+              asm_capture_buf := asm_capture_buf + c;
+          end;
       { this is now supported }
         if (c='$') then
          handledirectives;
@@ -5605,6 +5631,8 @@ type
                  end;
              end;
              readchar;
+             if asm_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+               asm_capture_buf := asm_capture_buf + c;
            until (found=2);
          end;
         current_commentstyle:=comment_none;
