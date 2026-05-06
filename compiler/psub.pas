@@ -365,15 +365,16 @@ implementation
                 begin reason:='param "'+p.realname+'" ('+p.vardef.typename+', size='+tostr(p.vardef.size)+'): only 1/2/4-byte params fit a single i386 register; QWord/Int64/record/array not yet supported'; exit; end;
               if not paraloc_is_single_intreg(p.paraloc[calleeside]) then
                 begin reason:='param "'+p.realname+'": ABI does not deliver it in a single integer register (likely passed via stack at this calling convention)'; exit; end;
-              { Default-value paras (e.g. RTL `get_caller_addr(framebp; addr:pointer=nil)`)
-                make the inline call site emit a load of the default-const sym at the
-                caller, then my v2(c) hook hoists that into a temp + rcd_load into the
-                ABI register. The default-const path interacts badly with the ttemprefnode
-                PPU writer for the inlininginfo of these RTL helpers (uuchar.pp PPU
-                compile crashed at $004AD3A0/$004DB1FB on system.ppu re-load), so reject
-                here until that path is debugged. }
-              if assigned(p.defaultconstsym) then
-                begin reason:='param "'+p.realname+'" has a default value; default-const inline path triggers a known PPU writer bug, rejected for now'; exit; end;
+              { Default-valued params (e.g. `addr:pointer=nil`) are accepted.
+                Caller-side machinery in ncal.pas materialises an omitted
+                optional arg as genconstsymtree(defaultconstsym) into the
+                tcallparanode chain BEFORE pass1_inline runs, so the v2(c)
+                hoist+rcd_load path sees a normal loadnode and the splice
+                proceeds through the same temp+cassignment pipeline as any
+                other arg. Cross-unit splice round-trips cleanly through
+                the .ppu now that fix/asm-inline-ppu-roundtrip has landed.
+                Regression coverage: tinlfpc_default_param_asm_smoke,
+                tinlfpc_default_param_asm_xunit. }
             end;
         st.ok:=true;
         st.reason:='';
