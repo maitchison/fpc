@@ -5,6 +5,23 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24b / Compiler 3.3.6b ==
+
+  * DFA / const-prop now runs on Pascal procs that inline pure-asm
+    helpers. Previously, splicing an inline-asm body into a Pascal
+    caller set pi_has_assembler_block on the caller (via
+    tasmnode.pass_typecheck), and the DFA optimiser pass at -O2+
+    bailed on any proc with that flag set. So a single
+    `cStart(slot)` call inside a 200-line Pascal procedure cost the
+    whole procedure its const-prop, dead-store-elimination, and
+    branch folding -- a long way past the splice site. The asmnode
+    cloned at splice time now carries a new asmnf_inline_splice
+    flag; pass_typecheck recognises it and leaves pi_has_assembler_
+    block clear. User-written `asm ... end;` blocks in your own
+    Pascal code still set the flag and still disable DFA -- only
+    the spliced clones of validated pure-asm helpers don't.
+
+
 == IDE 1.0.24a / Compiler 3.3.6a ==
 
   * Inline-asm constant-arg specialisation. When the caller passes

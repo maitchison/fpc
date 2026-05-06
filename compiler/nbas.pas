@@ -74,7 +74,17 @@ interface
        TAsmNodeFlag = (
          asmnf_get_asm_position,
          { Used registers in assembler block }
-         asmnf_has_registerlist
+         asmnf_has_registerlist,
+         { Marks an asmnode as a spliced inline-asm body (a clone of a
+           pio_inline_asm callee's body, produced by ncal.pass1_inline +
+           inline_clone_asm_labels). pass_typecheck on such a node does
+           NOT set pi_has_assembler_block on the surrounding procinfo --
+           the caller is still a normal Pascal procedure for DFA / const-
+           propagation purposes. The flag is set per-clone at splice
+           time; it is never present on the body the parser produces, so
+           a stored .ppu always has it cleared (safe default = treat as
+           user asm = set the flag). }
+         asmnf_inline_splice
        );
 
        TAsmNodeFlags = set of TAsmNodeFlag;
@@ -596,6 +606,14 @@ implementation
       begin
         if not assigned(an) or not assigned(an.p_asm) then
           exit;
+        { Tag this asmnode as a spliced inline-asm body so pass_typecheck
+          does NOT set pi_has_assembler_block on the caller's procinfo --
+          a Pascal caller that inlines a pure-asm helper should keep DFA
+          / const-prop available for the rest of its body. The actual
+          asmnode in the callee's PPU body never gets this flag (only
+          clones do); when pass_typecheck runs on the splice copy, the
+          flag is present and the procinfo stays clean. }
+        include(an.asmnodeflags,asmnf_inline_splice);
         labmap:=TFPHashList.Create;
         try
           { Pass 1: rename label definitions. }
@@ -1547,7 +1565,8 @@ implementation
       begin
         result:=nil;
         resultdef:=voidtype;
-        if not(asmnf_get_asm_position in asmnodeflags) then
+        if not(asmnf_get_asm_position in asmnodeflags) and
+           not(asmnf_inline_splice in asmnodeflags) then
           include(current_procinfo.flags,pi_has_assembler_block);
       end;
 
