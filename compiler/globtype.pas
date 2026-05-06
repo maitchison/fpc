@@ -178,7 +178,13 @@ interface
          cs_force_far_calls,
          cs_hugeptr_arithmetic_normalization,
          cs_hugeptr_comparison_normalization,
-         cs_legacyifend
+         cs_legacyifend,
+         (* Per-block opt-in for the i386 PMMX scheduler. When set inside
+            an `asm ... end;` block (via `{$schedule on}` immediately
+            before the block) the asm reader stamps the resulting
+            mark_AsmBlockStart marker with the flag, and the scheduler
+            processes the block instead of skipping it. *)
+         cs_schedule_asm
        );
        tlocalswitches = set of tlocalswitch;
 

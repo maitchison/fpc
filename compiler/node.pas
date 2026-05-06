@@ -783,12 +783,20 @@ implementation
 
     constructor tnode.ppuload(t:tnodetype;ppufile:tcompilerppufile);
 
+      var
+        localswitches_disk: tppuset5;
       begin
         nodetype:=t;
         { tnode fields }
         blocktype:=tblock_type(ppufile.getbyte);
         ppufile.getposinfo(fileinfo);
-        ppufile.getset(tppuset5(localswitches));
+        { tlocalswitches now exceeds 40 bits with cs_schedule_asm; on
+          disk we still use tppuset5 and pad on read. cs_schedule_asm
+          is a per-asm-block opt-in -- the value at code-gen time is
+          irrelevant after parse, so it doesn't need to round-trip. }
+        ppufile.getset(localswitches_disk);
+        fillchar(localswitches, sizeof(localswitches), 0);
+        move(localswitches_disk, localswitches, sizeof(localswitches_disk));
         verbosity:=ppufile.getlongint;
         ppufile.getderef(resultdefderef);
         ppufile.getset(tppuset2(flags));
@@ -800,10 +808,14 @@ implementation
 
 
     procedure tnode.ppuwrite(ppufile:tcompilerppufile);
+      var
+        localswitches_disk: tppuset5;
       begin
         ppufile.putbyte(byte(blocktype));
         ppufile.putposinfo(fileinfo);
-        ppufile.putset(tppuset5(localswitches));
+        fillchar(localswitches_disk, sizeof(localswitches_disk), 0);
+        move(localswitches, localswitches_disk, sizeof(localswitches_disk));
+        ppufile.putset(localswitches_disk);
         ppufile.putlongint(verbosity);
         ppufile.putderef(resultdefderef);
         ppufile.putset(tppuset2(flags));
