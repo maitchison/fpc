@@ -6057,20 +6057,46 @@ implementation
               begin
                 if not(vo_is_hidden_para in para.parasym.varoptions) then
                   begin
-                    paratempn:=ctempcreatenode.create(para.parasym.vardef,para.parasym.vardef.size,
-                      tt_persistent,true);
-                    if tabstractvarsym(para.parasym).varspez=vs_const then
-                      paratempn.includetempflag(ti_const);
-                    addstatement(inlineinitstatement,paratempn);
-                    addstatement(inlinecleanupstatement,ctempdeletenode.create(paratempn));
-                    addstatement(inlineinitstatement,
-                      cassignmentnode.create(ctemprefnode.create(paratempn),para.left.getcopy));
-                    addstatement(inlineinitstatement,
-                      cregcapturenode.create(
-                        paratempn.tempinfo,
-                        tparavarsym(para.parasym).paraloc[calleeside].location^.register,
-                        para.parasym.vardef,
-                        rcd_load));
+                    { v4(a) const-arg specialisation: when the caller
+                      passed a compile-time integer/ordinal constant or
+                      `nil`, skip the temp+cassignment+rcd_load triple
+                      and load the immediate straight into the para's
+                      ABI register. The asm body then sees the constant
+                      in its home reg without going through a stack
+                      slot, no Pascal-side store/reload at all. }
+                    if para.left.nodetype=ordconstn then
+                      begin
+                        addstatement(inlineinitstatement,
+                          cregcapturenode.create_const(
+                            tcgint(tordconstnode(para.left).value.svalue),
+                            tparavarsym(para.parasym).paraloc[calleeside].location^.register,
+                            para.parasym.vardef));
+                      end
+                    else if para.left.nodetype=niln then
+                      begin
+                        addstatement(inlineinitstatement,
+                          cregcapturenode.create_const(
+                            0,
+                            tparavarsym(para.parasym).paraloc[calleeside].location^.register,
+                            para.parasym.vardef));
+                      end
+                    else
+                      begin
+                        paratempn:=ctempcreatenode.create(para.parasym.vardef,para.parasym.vardef.size,
+                          tt_persistent,true);
+                        if tabstractvarsym(para.parasym).varspez=vs_const then
+                          paratempn.includetempflag(ti_const);
+                        addstatement(inlineinitstatement,paratempn);
+                        addstatement(inlinecleanupstatement,ctempdeletenode.create(paratempn));
+                        addstatement(inlineinitstatement,
+                          cassignmentnode.create(ctemprefnode.create(paratempn),para.left.getcopy));
+                        addstatement(inlineinitstatement,
+                          cregcapturenode.create(
+                            paratempn.tempinfo,
+                            tparavarsym(para.parasym).paraloc[calleeside].location^.register,
+                            para.parasym.vardef,
+                            rcd_load));
+                      end;
                   end;
                 para:=tcallparanode(para.right);
               end;

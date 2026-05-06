@@ -5,6 +5,17 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24a / Compiler 3.3.6a ==
+
+  * Inline-asm constant-arg specialisation. When the caller passes
+    an integer literal or `nil` to a register-cc parameter of a
+    pure-asm `inline` proc, the compiler now loads the constant
+    straight into the para's home register instead of routing it
+    through a stack temp. Net effect at every such call site: one
+    `mov reg, $imm` instead of `mov [slot], $imm ; mov reg, [slot]`.
+    Common case for `myinline(0, x)`, flag/mask args, etc.
+
+
 == IDE 1.0.24 / Compiler 3.3.6 ==
 
   * Cross-unit asm-inline now actually inlines instead of crashing

@@ -355,14 +355,25 @@ interface
                           across the following asmnode -- pass_generate_code
                           deliberately omits the matching ungetcpuregister so
                           the asmnode's deallocallcpuregisters at end-of-body
-                          is what frees it. }
-       tregcapturedirection = (rcd_capture, rcd_load);
+                          is what frees it.
+           rcd_load_const -- v4(a) pre-asm-body: load an immediate value
+                          directly into srcreg, bypassing the temp+
+                          assignment+rcd_load triple normally emitted
+                          for register-cc paras. Used at splice time
+                          when para.left is an ordconstn / niln /
+                          pointerconstn so the asm body sees the
+                          constant in its ABI register without going
+                          through a stack slot. tempinfo is unused
+                          (nil); immvalue holds the literal. }
+       tregcapturedirection = (rcd_capture, rcd_load, rcd_load_const);
        tregcapturenode = class(tnode)
           tempinfo  : ptempinfo;
           srcreg    : tregister;
           srcdef    : tdef;
           direction : tregcapturedirection;
+          immvalue  : tcgint;   { only valid when direction=rcd_load_const }
           constructor create(_tempinfo: ptempinfo; _srcreg: tregister; _srcdef: tdef; _direction: tregcapturedirection); virtual;
+          constructor create_const(_immvalue: tcgint; _srcreg: tregister; _srcdef: tdef); virtual;
           constructor ppuload(t:tnodetype;ppufile:tcompilerppufile);override;
           procedure ppuwrite(ppufile:tcompilerppufile);override;
           function dogetcopy: tnode; override;
@@ -2257,6 +2268,18 @@ implementation
         srcreg:=_srcreg;
         srcdef:=_srcdef;
         direction:=_direction;
+        immvalue:=0;
+      end;
+
+
+    constructor tregcapturenode.create_const(_immvalue: tcgint; _srcreg: tregister; _srcdef: tdef);
+      begin
+        inherited create(regcapturen);
+        tempinfo:=nil;
+        srcreg:=_srcreg;
+        srcdef:=_srcdef;
+        direction:=rcd_load_const;
+        immvalue:=_immvalue;
       end;
 
 
@@ -2283,6 +2306,7 @@ implementation
         n.srcreg:=srcreg;
         n.srcdef:=srcdef;
         n.direction:=direction;
+        n.immvalue:=immvalue;
         result:=n;
       end;
 
