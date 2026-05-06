@@ -3113,6 +3113,7 @@ var
   proctypeoption  : tproctypeoption;
   i     : longint;
   first : boolean;
+  procoptions_disk : tppuset8;
 begin
   write([space,'      Return type : ']);
   readderef('', ProcDef.ReturnType);
@@ -3138,7 +3139,11 @@ begin
   writeln;
   proccalloption:=tproccalloption(ppufile.getbyte);
   writeln([space,'       CallOption : ',proccalloptionStr[proccalloption]]);
-  ppufile.getset(tppuset8(procoptions));
+  { tprocoptions exceeds 64 bits with po_schedule_asm; on disk we
+    keep tppuset8 and pad on read. }
+  ppufile.getset(procoptions_disk);
+  fillchar(procoptions, sizeof(procoptions), 0);
+  move(procoptions_disk, procoptions, sizeof(procoptions_disk));
   if procoptions<>[] then
    begin
      if po_classmethod in procoptions then Include(ProcDef.Options, poClassMethod);

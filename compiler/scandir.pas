@@ -1586,6 +1586,16 @@ unit scandir;
         do_localswitch(cs_scopedenums);
       end;
 
+    procedure dir_schedule;
+      (* $schedule on/off -- per-block opt-in for the i386 PMMX
+         scheduler on inline asm blocks. Place immediately before an
+         `asm ... end;` block. The flag is sampled at parse time and
+         stamped onto the resulting mark_AsmBlockStart marker; the
+         scheduler then processes the block instead of skipping it. *)
+      begin
+        do_localswitch(cs_schedule_asm);
+      end;
+
     function get_peflag_const(const ident:string;error:longint):longint;
       var
         srsym : tsym;
@@ -2304,6 +2314,7 @@ unit scandir;
         AddDirective('SATURATION',directive_all, @dir_saturation);
         AddDirective('SAFEFPUEXCEPTIONS',directive_all, @dir_safefpuexceptions);
         AddDirective('SCOPEDENUMS',directive_all, @dir_scopedenums);
+        AddDirective('SCHEDULE',directive_all, @dir_schedule);
         AddDirective('SETPEFLAGS', directive_all, @dir_setpeflags);
         AddDirective('SETPEOPTFLAGS', directive_all, @dir_setpeoptflags);
         AddDirective('SETPEOSVERSION', directive_all, @dir_setpeosversion);

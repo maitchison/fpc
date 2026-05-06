@@ -2517,10 +2517,12 @@ implementation
                 { schedule after assembler optimization, it could have brought up
                   new schedule possibilities. On i386 this hook is post-RA
                   (the i386 scheduler reasons about real registers / U-V pairing
-                  on PMMX); on other targets it follows the pre-RA hook above. }
+                  on PMMX); on other targets it follows the pre-RA hook above.
+                  Pure assembler procedures are skipped UNLESS they carry the
+                  `schedule` proc modifier (po_schedule_asm). }
                 if (cs_opt_scheduler in current_settings.optimizerswitches) and
-                  { do not optimize pure assembler procedures }
-                  not(pi_is_assembler in flags)  then
+                   (not(pi_is_assembler in flags) or
+                    (po_schedule_asm in current_procinfo.procdef.procoptions)) then
                   preregallocschedule(aktproccode);
               end;
 {$endif NoOpt}

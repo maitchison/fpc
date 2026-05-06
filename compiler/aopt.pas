@@ -351,9 +351,11 @@ Unit aopt;
             BlockStart:=BlockEnd;
             While Assigned(BlockStart) And
                   (BlockStart.typ = ait_Marker) And
-                  (tai_Marker(BlockStart).Kind = mark_AsmBlockStart) Do
+                  (tai_Marker(BlockStart).Kind = mark_AsmBlockStart) And
+                  not tai_Marker(BlockStart).schedule_asm Do
               Begin
-                { we stopped at an assembler block, so skip it    }
+                { we stopped at an assembler block that did NOT opt in
+                  via $schedule on, so skip it    }
                 While GetNextInstruction(BlockStart, BlockStart) And
                       ((BlockStart.Typ <> Ait_Marker) Or
                        (tai_Marker(Blockstart).Kind <> mark_AsmBlockEnd)) Do;

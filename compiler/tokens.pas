@@ -256,6 +256,7 @@ type
     _REQUIRES,
     _RESIDENT,
     _SAFECALL,
+    _SCHEDULE,
     _SUBTRACT,
     _SYSVBASE,
     _ASSEMBLER,
@@ -604,6 +605,7 @@ const
       (str:'REQUIRES'      ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'RESIDENT'      ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'SAFECALL'      ;special:false;keyword:[m_none];op:NOTOKEN),
+      (str:'SCHEDULE'      ;special:false;keyword:[m_none];op:NOTOKEN), { proc modifier: opt-in to PMMX scheduler on pure asm proc }
       (str:'SUBTRACT'      ;special:false;keyword:[m_none];op:NOTOKEN), { delphi operator name }
       (str:'SYSVBASE'      ;special:false;keyword:[m_none];op:NOTOKEN),   { Syscall variation on MorphOS }
       (str:'ASSEMBLER'     ;special:false;keyword:[m_none];op:NOTOKEN),

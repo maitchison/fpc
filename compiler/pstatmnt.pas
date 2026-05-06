@@ -1110,8 +1110,11 @@ implementation
              hl:=asmreader.assemble as TAsmList;
              if (not hl.empty) then
                begin
-                 { mark boundaries of assembler block, this is necessary for optimizer }
-                 hl.insert(tai_marker.create(mark_asmblockstart));
+                 (* mark boundaries of assembler block, this is necessary for optimizer.
+                    The start marker carries the {$schedule on} opt-in for the i386
+                    PMMX scheduler, sampled from the localswitch state at parse time. *)
+                 hl.insert(tai_marker.CreateAsmBlock(mark_asmblockstart,
+                   cs_schedule_asm in current_settings.localswitches));
                  hl.concat(tai_marker.create(mark_asmblockend));
                end;
              asmstat:=casmnode.create(hl);
@@ -1358,8 +1361,11 @@ implementation
         until nesting<0;
         tokenbuf.free;
         tokenbuf := nil;
-        { mark boundaries of assembler block, this is necessary for optimizer }
-        hl.insert(tai_marker.create(mark_asmblockstart));
+        (* mark boundaries of assembler block, this is necessary for optimizer.
+           The start marker carries the {$schedule on} opt-in for the i386
+           PMMX scheduler. *)
+        hl.insert(tai_marker.CreateAsmBlock(mark_asmblockstart,
+          cs_schedule_asm in current_settings.localswitches));
         hl.concat(tai_marker.create(mark_asmblockend));
         { Mark procedure that it has assembler blocks }
         include(current_procinfo.flags,pi_has_assembler_block);

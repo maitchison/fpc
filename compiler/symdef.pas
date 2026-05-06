@@ -5910,6 +5910,8 @@ implementation
 
 
     constructor tabstractprocdef.ppuload(dt:tdeftyp;ppufile:tcompilerppufile);
+      var
+        procoptions_disk: tppuset8;
       begin
          inherited ppuload(dt,ppufile);
          parast:=nil;
@@ -5919,7 +5921,12 @@ implementation
          ppufile.getderef(returndefderef);
          proctypeoption:=tproctypeoption(ppufile.getbyte);
          proccalloption:=tproccalloption(ppufile.getbyte);
-         ppufile.getset(tppuset8(procoptions));
+         { procoptions on disk fits in tppuset8 (64 bits). Local-only
+           flags that landed past the 64-bit boundary -- po_schedule_asm
+           -- are NOT serialized; on load they default to false. }
+         ppufile.getset(procoptions_disk);
+         fillchar(procoptions, sizeof(procoptions), 0);
+         move(procoptions_disk, procoptions, sizeof(procoptions_disk));
 
          funcretloc[callerside].init;
          if po_explicitparaloc in procoptions then
@@ -5932,6 +5939,8 @@ implementation
 
 
     procedure tabstractprocdef.ppuwrite(ppufile:tcompilerppufile);
+      var
+        procoptions_disk: tppuset8;
       begin
          { released procdef? }
          if not assigned(parast) then
@@ -5940,7 +5949,12 @@ implementation
          ppufile.putderef(returndefderef);
          ppufile.putbyte(ord(proctypeoption));
          ppufile.putbyte(ord(proccalloption));
-         ppufile.putset(tppuset8(procoptions));
+         { Local-only flags past the 64-bit boundary (po_schedule_asm)
+           are masked off; only the first 8 bytes of procoptions go
+           to disk. }
+         fillchar(procoptions_disk, sizeof(procoptions_disk), 0);
+         move(procoptions, procoptions_disk, sizeof(procoptions_disk));
+         ppufile.putset(procoptions_disk);
 
          if (po_explicitparaloc in procoptions) then
            funcretloc[callerside].ppuwrite(ppufile);

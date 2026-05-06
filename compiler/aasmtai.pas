@@ -869,7 +869,16 @@ interface
        { Insert a marker for assembler and inline blocks }
        tai_marker = class(tai)
           Kind: TAsmMarker;
+          (* Only meaningful for mark_AsmBlockStart: opt-in flag for the
+             i386 PMMX scheduler. When true, the scheduler processes the
+             block instead of skipping it. Default false (preserves the
+             old "always skip user asm" behaviour). Not persisted in the
+             PPU (defaults to false on load); a `{$schedule on}` set in
+             one unit therefore does not propagate through cross-unit
+             inline splices. *)
+          schedule_asm: boolean;
           Constructor Create(_Kind: TAsmMarker);
+          Constructor CreateAsmBlock(_Kind: TAsmMarker; AScheduleAsm: boolean);
           constructor ppuload(t:taitype;ppufile:tcompilerppufile);override;
           procedure ppuwrite(ppufile:tcompilerppufile);override;
        end;
@@ -2710,6 +2719,16 @@ implementation
         Inherited Create;
         typ := ait_marker;
         Kind := _Kind;
+        schedule_asm := false;
+      end;
+
+
+    constructor Tai_Marker.CreateAsmBlock(_Kind: TAsmMarker; AScheduleAsm: boolean);
+      begin
+        Inherited Create;
+        typ := ait_marker;
+        Kind := _Kind;
+        schedule_asm := AScheduleAsm;
       end;
 
 
@@ -2717,6 +2736,7 @@ implementation
       begin
         inherited ppuload(t,ppufile);
         kind:=TAsmMarker(ppufile.getbyte);
+        schedule_asm := false;
       end;
 
 
