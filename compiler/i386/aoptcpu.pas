@@ -56,6 +56,7 @@ unit aoptcpu;
       aasmcfi,
       procinfo,
       cgutils,
+      schedi386,
       { units we should get rid off: }
       symsym,symconst;
 
@@ -493,5 +494,6 @@ unit aoptcpu;
 
 begin
   casmoptimizer:=TCpuAsmOptimizer;
+  cpreregallocscheduler:=TCpuPreRegallocScheduler;
 end.
 

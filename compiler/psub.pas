@@ -2513,14 +2513,14 @@ implementation
                    { do not optimize pure assembler procedures }
                    not(pi_is_assembler in flags)  then
                   optimize(aktproccode);
-{$ifndef i386}
                 { schedule after assembler optimization, it could have brought up
-                  new schedule possibilities }
+                  new schedule possibilities. On i386 this hook is post-RA
+                  (the i386 scheduler reasons about real registers / U-V pairing
+                  on PMMX); on other targets it follows the pre-RA hook above. }
                 if (cs_opt_scheduler in current_settings.optimizerswitches) and
                   { do not optimize pure assembler procedures }
                   not(pi_is_assembler in flags)  then
                   preregallocschedule(aktproccode);
-{$endif i386}
               end;
 {$endif NoOpt}
 
