@@ -792,14 +792,28 @@ interface
         NOT ungetcpuregister: srcreg must stay live across the upcoming
         tcgasmnode -- the asmnode's deallocallcpuregisters at end-of-body
         is what frees it. (allocallcpuregisters at start-of-body skips regs
-        already owned, so re-arming an already-allocated reg is a no-op.) }
+        already owned, so re-arming an already-allocated reg is a no-op.)
+
+      rcd_load_const (v4(a), pre-asm-body): const-arg specialisation. The
+        caller passed a compile-time constant for this para; load it
+        straight into srcreg with no temp slot, no Pascal-side assignment.
+        Same liveness contract as rcd_load -- no ungetcpuregister; the
+        following asmnode's deallocallcpuregisters frees srcreg. }
     procedure tcgregcapturenode.pass_generate_code;
       begin
         location_reset(location,LOC_VOID,OS_NO);
-        if not assigned(tempinfo) then
-          internalerror(2026050303);
-        if not(ti_valid in ctempinfoaccessor.gettempinfoflags(tempinfo)) then
-          internalerror(2026050304);
+        case direction of
+          rcd_capture,
+          rcd_load:
+            begin
+              if not assigned(tempinfo) then
+                internalerror(2026050303);
+              if not(ti_valid in ctempinfoaccessor.gettempinfoflags(tempinfo)) then
+                internalerror(2026050304);
+            end;
+          rcd_load_const:
+            ;   { tempinfo is nil here; immvalue carries the literal. }
+        end;
         cg.getcpuregister(current_asmdata.CurrAsmList,srcreg);
         case direction of
           rcd_capture:
@@ -811,6 +825,11 @@ interface
             begin
               hlcg.a_load_loc_reg(current_asmdata.CurrAsmList,srcdef,srcdef,tempinfo^.location,srcreg);
               { intentionally NO ungetcpuregister -- see comment above. }
+            end;
+          rcd_load_const:
+            begin
+              hlcg.a_load_const_reg(current_asmdata.CurrAsmList,srcdef,immvalue,srcreg);
+              { intentionally NO ungetcpuregister -- same reason as rcd_load. }
             end;
         end;
       end;
