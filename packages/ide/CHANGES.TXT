@@ -5,6 +5,54 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24f / Compiler 3.3.6f ==
+
+  * i386 PMMX scheduler now reports what it did. Each successful
+    [P, NP, P] -> [P, P, NP] hoist drops a `# sched-swap' comment
+    into the .s at the swap site, so a developer (or test harness)
+    can see exactly which instructions were paired. -vd adds a
+    one-line per-swap detail, plus per-proc and per-unit summary
+    lines:
+
+        [scheduler] swap: mov | shl | mov -> mov | mov | shl
+        [scheduler] system.fpc_ansistr_assign: 4 swap(s) (~4 cy)
+        [scheduler] unit system: 73 swap(s) (~73 cy)
+
+    A per-compile grand total surfaces at default verbosity (no -v
+    flag needed) when the scheduler fired at least once:
+
+        [scheduler] total: 1832 swap(s) (~1832 cy)
+
+    Cycle estimate is N x 1 -- each swap forms exactly one new U/V
+    pair on PMMX, saving one straight-line cycle. No loop weighting.
+    Two new regression tests bracket the behaviour:
+    `tinlfpc_sched_visible_swap' (positive control: hand-crafted
+    [movl, shll, movl, addl] in a `schedule;' asm proc; expects
+    exactly one marker) and `tinlfpc_sched_asm_mmx' (MMX inline-asm
+    body opted in via `{$schedule on}'; expects zero markers under
+    v1's integer-only pairable set). The lite-suite directive
+    %SCHED_SWAPS=N (with optional %SCHED_SWAPS_MIN/_MAX bounds)
+    asserts the marker count after a successful compile.
+
+  * `RDTSC' compiler intrinsic on i386. New inline node `in_x86_rdtsc'
+    binds the i386 RDTSC opcode (read time-stamp counter) into a
+    64-bit qword result via the standard EDX:EAX register-pair
+    pattern, so a Pascal-only `cStart'/`cStop' can read the TSC
+    without an asm block. When nothing else is live in EAX/EDX the
+    regalloc collapses the body to the bare RDTSC at the call site.
+    i386 only for now -- x86_64 also returns EDX:EAX but combining
+    them into a single 64-bit register needs a shl/or pair we haven't
+    implemented yet. Exposed via `intrinsics' unit; smoke test in
+    tinlfpc_rdtsc.
+
+  * ppudump now builds clean again. Commit 2397daec6b6 (IDE
+    checkboxes for asm-only inline + PMMX scheduler) added three
+    new enum values -- `cs_schedule_asm', `cs_opt_asm_inline',
+    `po_schedule_asm' -- without updating the parallel string and
+    mask arrays in ppudump.pp, so `make utils_all' bombed with
+    "Expected another 1 array elements". Three one-line additions.
+
+
 == IDE 1.0.24e / Compiler 3.3.6e ==
 
   * IDE Options | Compiler | Optimizations grew two new checkboxes for
