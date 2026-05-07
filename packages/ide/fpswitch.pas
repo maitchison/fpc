@@ -277,6 +277,14 @@ const
       opt_level4optimizations = 'Level ~4~ optimizations';
       { default ON in -O1+; tick to emit -OoNOSCCINLINEFIRST and disable }
       opt_no_scc_inline_first = '~N~o SCC inline-first';
+      { default ON; tick to emit -OoNOASMINLINE and disable
+        the assembler-only inline pipeline (escape hatch for splice
+        bugs in the still-experimental cross-unit asm-inline path). }
+      opt_no_asm_inline = 'No ~a~sm-only inline';
+      { default OFF; tick to emit -OoSCHEDULE and enable the
+        PMMX U/V pair-aware asm reorderer for global compiler runs.
+        Effective on -OpPENTIUM/PENTIUMMMX targets; no-op elsewhere. }
+      opt_pmmx_scheduler = 'PMMX asm sc~h~eduler';
       { optimization processor target }
       opt_i386486 = 'i~3~86/i486';
       { Menu labels for -Cp<cputype> / -Op<cputype>. Note: FPC has no
@@ -1305,6 +1313,14 @@ begin
        genericlevel1optimizerswitches and defaults ON; the IDE box
        is "tick to disable" -- emits -OoNOSCCINLINEFIRST. }
      AddBooleanItem(opt_no_scc_inline_first,'oNOSCCINLINEFIRST',idNone);
+     { cs_opt_asm_inline also defaults ON -- "tick to disable"; emits
+       -OoNOASMINLINE so an asm; nostackframe; inline; proc is left as
+       a normal CALL instead of being spliced into the caller. }
+     AddBooleanItem(opt_no_asm_inline,'oNOASMINLINE',idNone);
+     { cs_opt_scheduler defaults OFF; "tick to enable" -- emits
+       -OoSCHEDULE so the i386 PMMX U/V pair reorderer runs. Only
+       effective on -OpPENTIUM[MMX] targets (early-exits otherwise). }
+     AddBooleanItem(opt_pmmx_scheduler,'oSCHEDULE',idNone);
    end;
   New(ProcessorOptimizationSwitches,InitSelect('O'));
   with ProcessorOptimizationSwitches^ do

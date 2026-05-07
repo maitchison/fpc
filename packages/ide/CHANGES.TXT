@@ -5,6 +5,40 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24e / Compiler 3.3.6e ==
+
+  * IDE Options | Compiler | Optimizations grew two new checkboxes for
+    the recent asm-related compiler switches:
+
+      [ ] No asm-only inline       (cs_opt_asm_inline -- default ON)
+      [ ] PMMX asm scheduler       (cs_opt_scheduler  -- default OFF)
+
+    The first is the kill-switch for the still-experimental asm-only
+    inline pipeline (cross-unit splice, register-cc paras, register
+    return). When ticked, fp.cfg gets -OoNOASMINLINE and
+    is_assembler_inlineable rejects every candidate up-front; an
+    `assembler; nostackframe; inline;' proc is then emitted as a
+    normal CALL. Useful when chasing a compile-time crash that's
+    suspected to be in the splice path -- flip the box, recompile,
+    see whether the crash goes away.
+
+    The second exposes the PMMX U/V pair scheduler (added in 3.3.6c)
+    as an IDE-discoverable toggle. Tick it to add -OoSCHEDULE; pair
+    with the Processor tab's PENTIUM or PENTIUMMMX target for it to
+    actually fire (the scheduler early-exits on other CPUs).
+
+    Both switches are also reachable via the command line (-OoXXXX),
+    fp.cfg, and the new test-play.ps1 harness's -NoAsmInline /
+    -Scheduler flags.
+
+  * test-play.ps1 -- new go32v2-native regression-test harness for
+    dev\video\play.pas. Mirrors test-lite.ps1 in spirit (run-after-
+    rebuild, exit-code-gated) but cross-compiles inside DOSBox-X with
+    cycles=max + core=dynamic, captures compile.txt for crash
+    analysis, and supports the two flags above for bisecting compiler
+    regressions against play.pas without touching dev\video\.
+
+
 == IDE 1.0.24d / Compiler 3.3.6d ==
 
   * `specialize-set' parameters can now declare a default value, e.g.
