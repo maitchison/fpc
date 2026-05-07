@@ -105,6 +105,8 @@ unit schedi386;
 
     Type
       TCpuPreRegallocScheduler = class(TAsmScheduler)
+        constructor Create(_AsmL: TAsmList); override;
+        destructor Destroy; override;
         function SchedulerPass1Cpu(var p: tai): boolean; override;
       end;
 
@@ -112,9 +114,24 @@ unit schedi386;
 
     uses
       globtype, globals,
+      cutils,
       verbose,
       cpuinfo,
-      aasmcpu;
+      aasmcpu,
+      fmodule, procinfo;
+
+
+    { Visibility counters. Each successful [P,NP,P]->[P,P,NP] swap is one
+      newly-formed U/V pair on PMMX, saving exactly one cycle in straight-
+      line execution. We track three nested totals and emit them at -vd
+      level (per-proc, per-unit) plus a per-compile grand total at the
+      always-on V_Normal level (so it surfaces without -vh) when any
+      swap fired during the run. }
+    var
+      swaps_proc  : longint;
+      swaps_unit  : longint;
+      swaps_total : longint;
+      last_unit_name : shortstring;
 
 
     { ------------------------------------------------------------------
@@ -369,6 +386,58 @@ unit schedi386;
       end;
 
 
+    constructor TCpuPreRegallocScheduler.Create(_AsmL: TAsmList);
+      begin
+        inherited Create(_AsmL);
+        { swaps_proc is reset for each new procdef. _unit and _total
+          carry across calls and are flushed in Destroy / finalization. }
+        swaps_proc := 0;
+      end;
+
+
+    destructor TCpuPreRegallocScheduler.Destroy;
+      var
+        modname, procname : shortstring;
+      begin
+        if swaps_proc > 0 then
+          begin
+            modname := '';
+            if assigned(current_module) and assigned(current_module.modulename) then
+              modname := current_module.modulename^;
+            procname := '?';
+            if assigned(current_procinfo) and
+               assigned(current_procinfo.procdef) then
+              procname := current_procinfo.procdef.fullprocname(false);
+
+            { Unit boundary: when the module changes between two procs
+              that both produced swaps, flush the prior unit's running
+              tally before re-zeroing. The very last unit's tally is
+              flushed in the unit's finalization block. }
+            if (last_unit_name <> '') and (last_unit_name <> modname) then
+              begin
+                if (swaps_unit > 0) and CheckVerbosity(V_Debug) then
+                  Comment(V_Debug,
+                    '[scheduler] unit '+last_unit_name+': '+
+                    tostr(swaps_unit)+' swap(s) (~'+
+                    tostr(swaps_unit)+' cy)');
+                swaps_unit := 0;
+              end;
+            last_unit_name := modname;
+
+            if CheckVerbosity(V_Debug) then
+              Comment(V_Debug,
+                '[scheduler] '+modname+'.'+procname+': '+
+                tostr(swaps_proc)+' swap(s) (~'+
+                tostr(swaps_proc)+' cy)');
+
+            inc(swaps_unit, swaps_proc);
+            inc(swaps_total, swaps_proc);
+            swaps_proc := 0;
+          end;
+        inherited Destroy;
+      end;
+
+
     { ------------------------------------------------------------------
       Main pass. Walks the block applying I1/I2/I3 swap.
       ------------------------------------------------------------------ }
@@ -437,6 +506,24 @@ unit schedi386;
             { Move i3 to sit immediately after i1 (before i2). }
             AsmL.Remove(i3);
             AsmL.InsertAfter(i3, i1);
+
+            { Visibility: drop a marker comment that survives into the
+              .s file so tests can grep for it, and emit a -vd line
+              describing the swap so a developer running with -vd sees
+              every reorder as it fires. }
+            AsmL.InsertAfter(tai_comment.Create(strpnew('sched-swap')), i1);
+            inc(swaps_proc);
+            if CheckVerbosity(V_Debug) then
+              Comment(V_Debug,
+                '[scheduler] swap: '+
+                std_op2str[taicpu(i1).opcode]+' | '+
+                std_op2str[taicpu(i2).opcode]+' | '+
+                std_op2str[taicpu(i3).opcode]+
+                ' -> '+
+                std_op2str[taicpu(i1).opcode]+' | '+
+                std_op2str[taicpu(i3).opcode]+' | '+
+                std_op2str[taicpu(i2).opcode]);
+
             { Re-anchor at the moved i3 -- it might pair with the
               instruction now after it. }
             i1 := tai(i3.next);
@@ -446,4 +533,19 @@ unit schedi386;
         p := BlockEnd;
       end;
 
+
+finalization
+  { Last unit's running tally was never flushed by a subsequent
+    module-boundary -- flush it now. Then dump the per-compile total. }
+  if (swaps_unit > 0) and CheckVerbosity(V_Debug) then
+    Comment(V_Debug,
+      '[scheduler] unit '+last_unit_name+': '+
+      tostr(swaps_unit)+' swap(s) (~'+
+      tostr(swaps_unit)+' cy)');
+  if swaps_total > 0 then
+    { V_Normal so the grand total surfaces at default verbosity --
+      V_Hint would require -vh which most invocations don't set. }
+    Comment(V_Normal,
+      '[scheduler] total: '+tostr(swaps_total)+
+      ' swap(s) (~'+tostr(swaps_total)+' cy)');
 end.
