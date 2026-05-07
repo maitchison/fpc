@@ -2439,7 +2439,8 @@ const
         'i8086 force FAR calls', {cs_force_far_calls}
         'i8086 huge pointer arithmetic', {cs_hugeptr_arithmetic_normalization}
         'i8086 huge pointer comparison', {cs_hugeptr_comparison_normalization}
-        'enforce legacy ifend behaviour' {cs_legacyifend}
+        'enforce legacy ifend behaviour', {cs_legacyifend}
+        'i386 PMMX schedule asm block' {cs_schedule_asm}
        );
        { Switches which can be changed by a mode (fpc,tp7,delphi) }
        modeswitchname : array[tmodeswitch] of string[50] =
@@ -2536,7 +2537,8 @@ const
          'cs_opt_unused_para',
          'cs_opt_consts',
          'cs_opt_forloop',
-         'cs_opt_scc_inline_first'
+         'cs_opt_scc_inline_first',
+         'cs_opt_asm_inline'
        );
     var
          globalswitch  : tglobalswitch;
@@ -3107,7 +3109,8 @@ const
      (mask:po_objc_related_result_type; str: 'Objective-C related result type'),
      (mask:po_anonymous;       str: 'Anonymous'),
      (mask:po_wasm_funcref;    str: 'WebAssembly funcref'),
-     (mask:po_wasm_suspending; str: 'WebAssembly suspending')
+     (mask:po_wasm_suspending; str: 'WebAssembly suspending'),
+     (mask:po_schedule_asm;    str: 'i386 PMMX schedule asm body')
   );
 var
   proctypeoption  : tproctypeoption;

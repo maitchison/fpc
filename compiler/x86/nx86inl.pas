@@ -144,6 +144,13 @@ implementation
            in_x86_cli,
            in_x86_sti:
              resultdef:=voidtype;
+{$ifdef i386}
+           in_x86_rdtsc:
+             begin
+               CheckParameters(0);
+               resultdef:=u64inttype;
+             end;
+{$endif i386}
            in_x86_get_cs,
            in_x86_get_ss,
            in_x86_get_ds,
@@ -175,6 +182,9 @@ implementation
            in_x86_get_ds,
            in_x86_get_es,
            in_x86_get_fs,
+{$ifdef i386}
+           in_x86_rdtsc,
+{$endif i386}
            in_x86_get_gs:
              expectloc:=LOC_REGISTER;
            in_x86_outportb,
@@ -620,6 +630,29 @@ implementation
              current_asmdata.CurrAsmList.concat(taicpu.op_none(A_STI));
            in_x86_pause:
              current_asmdata.CurrAsmList.concat(taicpu.op_none(A_PAUSE));
+{$ifdef i386}
+           in_x86_rdtsc:
+             begin
+               { RDTSC writes the 64-bit time-stamp counter into EDX:EAX
+                 (high:low). We pin EAX/EDX, emit the instruction, then
+                 hand the two halves to the register allocator as a 64-bit
+                 register pair. If nothing else is live in EAX/EDX the
+                 allocator picks them for the virtual halves and the
+                 a_load_reg_reg pair becomes identity moves that the
+                 peephole pass deletes -- so the body collapses to the
+                 single RDTSC opcode at the call site. }
+               hlcg.getcpuregister(current_asmdata.CurrAsmList,NR_EAX);
+               hlcg.getcpuregister(current_asmdata.CurrAsmList,NR_EDX);
+               current_asmdata.CurrAsmList.concat(taicpu.op_none(A_RDTSC));
+               location_reset(location,LOC_REGISTER,def_cgsize(resultdef));
+               cg.ungetcpuregister(current_asmdata.CurrAsmList,NR_EDX);
+               location.register64.reghi:=cg.getintregister(current_asmdata.CurrAsmList,OS_INT);
+               cg.a_load_reg_reg(current_asmdata.CurrAsmList,OS_INT,OS_INT,NR_EDX,location.register64.reghi);
+               cg.ungetcpuregister(current_asmdata.CurrAsmList,NR_EAX);
+               location.register64.reglo:=cg.getintregister(current_asmdata.CurrAsmList,OS_INT);
+               cg.a_load_reg_reg(current_asmdata.CurrAsmList,OS_INT,OS_INT,NR_EAX,location.register64.reglo);
+             end;
+{$endif i386}
            in_x86_get_cs:
              get_segreg(NR_CS);
            in_x86_get_ss:
