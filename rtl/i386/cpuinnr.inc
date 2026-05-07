@@ -27,6 +27,7 @@
   fpc_in_x86_get_fs   = fpc_in_cpu_first+12;
   fpc_in_x86_get_gs   = fpc_in_cpu_first+13;
   fpc_in_x86_pause    = fpc_in_cpu_first+14;
+  fpc_in_x86_rdtsc    = fpc_in_cpu_first+15;
 
   { include automatically generated numbers }
   {$ifndef VER3_2}

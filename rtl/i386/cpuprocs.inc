@@ -28,3 +28,4 @@ function fpc_x86_get_es:longint;[internproc:fpc_in_x86_get_es];
 function fpc_x86_get_fs:longint;[internproc:fpc_in_x86_get_fs];
 function fpc_x86_get_gs:longint;[internproc:fpc_in_x86_get_gs];
 procedure fpc_x86_pause;[internproc:fpc_in_x86_pause];
+function fpc_x86_rdtsc:qword;[internproc:fpc_in_x86_rdtsc];
