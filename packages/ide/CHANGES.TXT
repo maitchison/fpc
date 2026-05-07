@@ -5,6 +5,25 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24d / Compiler 3.3.6d ==
+
+  * `specialize-set' parameters can now declare a default value, e.g.
+
+        procedure dith(k: integer specialize [1, 4, 8] = 4);
+        procedure flag(b: boolean specialize [true, false] = true);
+
+    Callers omitting the optional argument bind to the dispatch stub
+    just as they would for any normal default-valued parameter.
+    Pre-fix the parser stored `defaultconstsym' on the (renamed-hidden)
+    original procdef but pspecset's dispatch-stub re-emitter rebuilt
+    the signature as bare `name : typename' and dropped the default,
+    so omitting the argument failed with "Wrong number of parameters
+    specified". The stub now carries the user's `= <literal>' on each
+    parameter, and the spec-set parameter's default is validated to
+    be a member of the set at after-body emit time (the case-table
+    dispatch has no else arm, so an out-of-set default would otherwise
+    silently fall through at runtime).
+
 == IDE 1.0.24c / Compiler 3.3.6c ==
 
   * Pascal-style block comments inside a `specialize-set' asm body
