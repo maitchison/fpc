@@ -552,8 +552,13 @@ Const
         { cs_opt_scc_inline_first defaults ON regardless of -O level:
           it is a correctness mode for cross-unit inline expansion
           under the new ctask scheduler, not a code-quality knob. -O-
-          (or explicit -OoNOSCCINLINEFIRST) drops it. }
-        optimizerswitches : [cs_opt_scc_inline_first];
+          (or explicit -OoNOSCCINLINEFIRST) drops it.
+          cs_opt_asm_inline likewise defaults ON regardless of level:
+          asm-inline only fires for procs explicitly marked
+          `assembler; nostackframe; inline;`, so cost when nothing
+          opts in is zero. -OoNOASMINLINE is the escape hatch when a
+          body trips the still-experimental splice/codegen path. }
+        optimizerswitches : [cs_opt_scc_inline_first,cs_opt_asm_inline];
         genwpoptimizerswitches : [];
         dowpoptimizerswitches : [];
 {$ifdef i8086}

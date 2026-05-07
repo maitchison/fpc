@@ -396,7 +396,15 @@ interface
            with the inline expanded. The classic depth-first scheduler
            did not need this -- it compiled provider impls before
            consumer impls by construction. }
-         cs_opt_scc_inline_first
+         cs_opt_scc_inline_first,
+         { Asm-only inline pipeline. Default ON. When OFF (-OoNOASMINLINE),
+           is_assembler_inlineable rejects every candidate, so an
+           `assembler; nostackframe; inline;` proc is never spliced --
+           it's emitted as a normal call instead. Escape hatch for the
+           still-experimental cross-unit asm-inline path: if a body
+           tickles a splice/codegen bug, flip this off to fall back to
+           pre-asm-inline behaviour without rebuilding the compiler. }
+         cs_opt_asm_inline
        );
        toptimizerswitches = set of toptimizerswitch;
 
@@ -476,7 +484,8 @@ interface
          'CONSTPROP',
          'DEADSTORE','FORCENOSTACKFRAME','USELOADMODIFYSTORE',
          'UNUSEDPARA','CONSTS','FORLOOP',
-         'SCCINLINEFIRST'
+         'SCCINLINEFIRST',
+         'ASMINLINE'
        );
 
        { Numeric -OoKEY=N knobs (parsed by dirparse.UpdateOptimizerStr).
@@ -518,9 +527,11 @@ interface
        );
 
        { switches being applied to all CPUs at the given level.
-         cs_opt_scc_inline_first is in level1 so any -O1+ build gets
-         the SCC inline-deferral fix; -O- (level0) drops it. }
-       genericlevel1optimizerswitches = [cs_opt_level1,cs_opt_peephole,cs_opt_scc_inline_first];
+         cs_opt_scc_inline_first and cs_opt_asm_inline are in level1
+         so any -O1+ build gets the SCC inline-deferral fix and the
+         asm-inline pipeline; -O- (level0) drops them. The init_settings
+         default in globals.pas keeps both ON at -O- as well. }
+       genericlevel1optimizerswitches = [cs_opt_level1,cs_opt_peephole,cs_opt_scc_inline_first,cs_opt_asm_inline];
        genericlevel2optimizerswitches = [cs_opt_level2,cs_opt_remove_empty_proc,cs_opt_unused_para];
        genericlevel3optimizerswitches = [cs_opt_level3,cs_opt_constant_propagate,cs_opt_nodedfa,cs_opt_loopstrength
                                          {$ifndef llvm},cs_opt_use_load_modify_store{$endif},
