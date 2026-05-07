@@ -2,24 +2,27 @@
 { %RESULT=0 }
 { %SCHED_SWAPS=0 }
 {
-  v1 PMMX scheduler against an MMX inline-asm body, opted in via
-  {$schedule on}. v1's pairable set
-  (compiler/i386/schedi386.pas:OpcodeIsPairable) is integer-only --
-  MOVD, PADDW, etc. fall into the "non-pairable but not a barrier"
-  bucket -- so the scheduler walks the body but never finds a
-  [P, NP, P] shape and never swaps. Marker count must be 0.
+  PMMX scheduler against an MMX inline-asm body, opted in via
+  {$schedule on}. Marker count must be 0 -- but the reason is more
+  subtle now than it was before Path A.
 
-  When Path A extends the pairable set to MMX integer ALU
-  (PADDx, PSUBx, PCMPx, PAND/POR/PXOR/PANDN, MOVD, MOVQ, PACK*,
-  PUNPCK*) this test will start failing with markers > 0. That's
-  the explicit signal that:
-    (a) the pair-formation logic now reaches MMX, and
-    (b) the test should be re-evaluated -- bump %SCHED_SWAPS to the
-        new expected count after auditing the .s, and confirm the
-        two independent mm1/mm2 chains are still serialised
-        correctly (each chain's PADDW is RAW-dependent on the
-        previous PADDW -- the scheduler must NOT pair within a
-        chain, only across the two chains).
+  Pre-Path-A: MOVD/PADDW were not in OpcodeIsPairable, so the
+  scheduler walked the body but never found any pair-able
+  candidates and never swapped.
+
+  Post-Path-A (A1 lands MMX as pairable, A3 walks a backward
+  window of 8): every cross-chain adjacency in this body already
+  forms a valid U/V pair by linear order alone. mm1's chain ends
+  at `paddw mm1, mm1` (instr [4]); the next instruction `movl $7,
+  %ebx` has no register/flag/memory overlap with it, so [4]+[5]
+  already pair. The mm2 chain's first paddw is RAW-dep'd on the
+  preceding `movd %ebx, %mm2`, so it can't slide left past it.
+  Net: nothing for the backward-window to hoist.
+
+  This test therefore stays at 0 markers as a regression sentinel.
+  If a future scheduler revision (Path B / list-scheduler) ever
+  starts forming new pairs here, the marker count will rise --
+  audit the .s and update the assertion.
 
   Correctness side: each PADDW doubles the low 16-bit lane.
     mm1 starts as 4 -> 4*2*2*2 = 32 in the low word.

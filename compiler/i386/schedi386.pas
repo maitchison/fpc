@@ -19,47 +19,57 @@
       Agner Fog, "Optimizing assembly language for x86", appendix on
         Pentium scheduling.
 
-    A simplified, conservative model is used here. We split opcodes
-    into two classes:
+    Opcode classes (Path A / A2):
 
-      UV-pairable -- single-cycle ALU/move/lea/inc/dec/nop forms that
-                     can run in either pipe.
+      pc_UV     -- pairable, runs in either pipe. Integer ALU/move/lea/
+                   inc/dec/nop and the bulk of MMX integer ALU/cmp/log/
+                   pack/unpack/movd/movq.
+      pc_UOnly  -- pairable but pinned to U pipe: MMX multiplier
+                   (PMUL*, PMADDWD) and MMX shift (PSL*, PSR*).
+      pc_VOnly  -- pairable but pinned to V pipe: Jcc / JMP near /
+                   CALL near / LOOP / JCXZ / JECXZ. All of these are
+                   block barriers in our scheduler so this class is
+                   only here for completeness.
+      pc_None   -- non-pairable. Multi-cycle / microcoded / FP / etc.
+                   "Issues alone" cycle-wise; never enters U+V pairing.
 
-      Non-pairable (NP) -- everything else: multi-cycle, microcoded,
-                     control flow, memory string ops, FP, MMX, etc.
-                     Conservatively treated as "issues alone".
+    Pair-validity (whether two instructions can issue together as U+V)
+    requires:
 
-    Pair-validity (whether a UV+UV pair is actually legal as second-
-    instruction-in-V) requires:
-
+      * Both pairable.
+      * Not both pc_UOnly and not both pc_VOnly.
       * No register read-after-write between the pair (no RAW).
       * No flag read-after-write.
       * No write-after-write to the same register/flags.
       * At most one of the two references memory (we do not have alias
         analysis, so we forbid both-mem).
 
-    --- algorithm --------------------------------------------------------
+    --- algorithm (Path A: backward sliding window) ----------------------
 
-    Walk the basic block. When we see:
+    Walk the basic block forward. At each pairable instruction `target`,
+    look backward up to 8 eligible positions for an `anchor` such that:
 
-        I1  (UV-pairable)
-        I2  (non-pairable, or pairable but blocking against I1)
-        I3  (UV-pairable)
+      * anchor is pairable
+      * CanIssueParallel(class(anchor), class(target)) holds
+      * target can commute pairwise with every instruction strictly
+        between anchor and target (HasDep clears at every step)
+      * anchor doesn't already form a pair with its current next
+        neighbour (avoid no-op churn that just shuffles which
+        adjacency forms the U/V cycle)
+      * anchor + target itself form a legal pair (HasDep clears)
 
-    and (a) I2 and I3 are independent (we can swap them), and (b) I1
-    and I3 form a legal pair, then rewrite to:
+    If yes, splice target out and reinsert it immediately after anchor.
+    The intermediates shift right by one; semantics are preserved by
+    the pairwise commutativity check.
 
-        I1  I3  I2
+    v1 looked only at the [P, NP, P] one-step shape -- a candidate
+    buried more than one position behind a P had no chance. Path A's
+    window-of-8 catches NP-laden chains plus register-dep chains
+    (e.g. mm0 RAW chain followed by an independent mm5 op).
 
-    so I1 and I3 issue together as U+V on the next cycle, and I2
-    issues alone afterwards. Net saving on PMMX: one cycle.
-
-    This is a peephole-style rewrite (one local move at a time) rather
-    than a full list-scheduler. Easier to validate; once a pair forms
-    we re-scan and may pair the displaced I2 with whatever lands next.
-
-    Future work: 2-distance moves, AGI-stall avoidance, U-only/V-only
-    modelling (currently we treat the pairable set as fully symmetric).
+    Future work (Path B): real list scheduler with a dependency DAG,
+    latency-aware priority (PMUL is 3-cycle, AGI is 1-cycle), forward
+    motion. See scheduler-plan.md.
 
     --- safety -----------------------------------------------------------
 
@@ -68,6 +78,8 @@
       ait_cfi, ait_stab/ait_dwarf-equivalent debug nodes, anything
       not explicitly known.
       Any control-flow instruction (jmp/jcc/call/ret/int/loop/...).
+      EMMS / FEMMS  (MMX <-> x87 state transition).
+      PUSH / POP / PUSHA / POPA / ENTER / LEAVE  (touch ESP and memory).
 
     Memory model: any instruction with a memory operand creates a hard
     barrier with any other memory-touching instruction (no alias info).
@@ -145,11 +157,37 @@ unit schedi386;
     function OpcodeIsPairable(op: tasmop): boolean;
       begin
         case op of
+          { Integer ALU / move / lea / inc / dec / nop -- the original
+            v1 set; symmetric U/V on P5 and P55C. }
           A_MOV,
           A_ADD, A_SUB, A_AND, A_OR, A_XOR, A_CMP, A_TEST,
           A_INC, A_DEC,
           A_LEA,
-          A_NOP:
+          A_NOP,
+
+          { Path A / A1 -- MMX integer ALU / compare / logical / pack /
+            unpack / inter-domain move. UV-pairable on P55C (both pipes
+            can execute these). }
+          A_MOVD, A_MOVQ,
+          A_PADDB, A_PADDW, A_PADDD,
+          A_PADDSB, A_PADDSW, A_PADDUSB, A_PADDUSW,
+          A_PSUBB, A_PSUBW, A_PSUBD,
+          A_PSUBSB, A_PSUBSW, A_PSUBUSB, A_PSUBUSW,
+          A_PCMPEQB, A_PCMPEQW, A_PCMPEQD,
+          A_PCMPGTB, A_PCMPGTW, A_PCMPGTD,
+          A_PAND, A_PANDN, A_POR, A_PXOR,
+          A_PUNPCKLBW, A_PUNPCKLWD, A_PUNPCKLDQ,
+          A_PUNPCKHBW, A_PUNPCKHWD, A_PUNPCKHDQ,
+          A_PACKSSDW, A_PACKSSWB, A_PACKUSWB,
+
+          { Path A / A1 -- MMX multiplier (U-only). Pairable, but only
+            in U pipe; OpcodeClass below tags these pc_UOnly. }
+          A_PMULLW, A_PMULHW, A_PMADDWD,
+
+          { Path A / A1 -- MMX shift (U-only). Pairable, U pipe only. }
+          A_PSLLW, A_PSLLD, A_PSLLQ,
+          A_PSRLW, A_PSRLD, A_PSRLQ,
+          A_PSRAW, A_PSRAD:
             Result := true;
           else
             Result := false;
@@ -172,11 +210,81 @@ unit schedi386;
           A_STOSB, A_STOSW, A_STOSD,
           A_LODSB, A_LODSW, A_LODSD,
           A_SCASB, A_SCASW, A_SCASD,
-          A_CMPSB, A_CMPSW, A_CMPSD:
+          A_CMPSB, A_CMPSW, A_CMPSD,
+
+          { Path A / A1 -- MMX <-> x87 state-transition. EMMS empties
+            the FP tag word so subsequent x87 ops see an empty stack;
+            FEMMS is the AMD "fast EMMS" 3DNow! variant. Reordering
+            across either is a correctness hazard, and the next
+            instruction stalls multiple cycles anyway. }
+          A_EMMS, A_FEMMS,
+
+          { Path A / A1 -- stack/frame ops. Touch ESP and memory in
+            ways the coarse memory model in HasDep can't reason about;
+            v1 missed these. Conservative barrier: never reorder
+            across. }
+          A_PUSH, A_POP, A_PUSHA, A_PUSHAD, A_POPA, A_POPAD,
+          A_ENTER, A_LEAVE:
             Result := true;
           else
             Result := false;
         end;
+      end;
+
+
+    { ------------------------------------------------------------------
+      Path A / A2 -- U/V pipe classification.
+
+      Two opcodes can occupy a U/V slot together iff:
+        * both pairable
+        * they don't both want U-only
+        * they don't both want V-only
+        * (existing register/flag/memory hazard checks)
+
+      pc_UOnly  : MMX multiplier (PMUL*, PMADDWD) -- multiplier unit
+                  lives off the U pipe.
+                  MMX shift (PSL*, PSR*) -- shifter unit, U pipe.
+      pc_VOnly  : Jcc / JMP near / CALL near / LOOP / JCXZ / JECXZ.
+                  All of these are block barriers in our scheduler so
+                  they never reach this function with a pairable
+                  classification -- pc_VOnly is here for completeness.
+      pc_UV     : Everything else in OpcodeIsPairable.
+      pc_None   : Anything outside OpcodeIsPairable.
+
+      Source of truth: Intel Pentium Family Developer's Manual Vol. 3,
+      ch. 13 ("Optimization Techniques for the Pentium Processor"),
+      cross-checked against Agner Fog's Pentium appendix.
+      ------------------------------------------------------------------ }
+    type
+      TPairClass = (pc_None, pc_UV, pc_UOnly, pc_VOnly);
+
+
+    function OpcodeClass(op: tasmop): TPairClass;
+      begin
+        case op of
+          A_PMULLW, A_PMULHW, A_PMADDWD,
+          A_PSLLW, A_PSLLD, A_PSLLQ,
+          A_PSRLW, A_PSRLD, A_PSRLQ,
+          A_PSRAW, A_PSRAD:
+            Result := pc_UOnly;
+          else
+            if OpcodeIsPairable(op) then
+              Result := pc_UV
+            else
+              Result := pc_None;
+        end;
+      end;
+
+
+    function CanIssueParallel(c1, c2: TPairClass): boolean;
+      begin
+        if (c1 = pc_None) or (c2 = pc_None) then
+          exit(false);
+        if (c1 = pc_UOnly) and (c2 = pc_UOnly) then
+          exit(false);
+        if (c1 = pc_VOnly) and (c2 = pc_VOnly) then
+          exit(false);
+        Result := true;
       end;
 
 
@@ -363,6 +471,8 @@ unit schedi386;
     function CanPair(self_: TAsmScheduler; i1, i3: tai): boolean;
       begin
         Result := IsPairable(i1) and IsPairable(i3) and
+                  CanIssueParallel(OpcodeClass(taicpu(i1).opcode),
+                                   OpcodeClass(taicpu(i3).opcode)) and
                   not HasDep(self_, i1, i3);
       end;
 
@@ -383,6 +493,40 @@ unit schedi386;
               exit(q);
             q := tai(q.next);
           end;
+      end;
+
+
+    { Symmetric counterpart for the Path A backward window walk. }
+    function PrevEligible(p: tai): tai;
+      var
+        q: tai;
+      begin
+        Result := nil;
+        if p = nil then
+          exit;
+        q := tai(p.previous);
+        while assigned(q) do
+          begin
+            if not (q.typ in [ait_comment, ait_regalloc]) then
+              exit(q);
+            q := tai(q.previous);
+          end;
+      end;
+
+
+    { Path A / A3 helper -- does `anchor` already form a legal pair
+      with its immediate next eligible neighbour? Used to suppress
+      hoists that would just shuffle which adjacency carries the U/V
+      cycle (no cycle-count benefit, but real .s churn). }
+    function AlreadyPairsWithNext(self_: TAsmScheduler; anchor: tai): boolean;
+      var
+        n: tai;
+      begin
+        Result := false;
+        n := NextEligible(anchor);
+        if (n = nil) or IsBarrier(n) then
+          exit;
+        Result := CanPair(self_, anchor, n);
       end;
 
 
@@ -439,11 +583,81 @@ unit schedi386;
 
 
     { ------------------------------------------------------------------
-      Main pass. Walks the block applying I1/I2/I3 swap.
+      Path A / A3 -- backward sliding window.
+
+      For pairable instruction `target`, walk left up to max_back
+      eligible positions looking for an `anchor` we can hoist target
+      next to. At each step, target must commute with the new walker
+      (HasDep clear); a barrier or a hard dep stops the search.
+
+      Commit when walker is itself pairable + can-issue-parallel
+      with target + isn't already pairing with its immediate next
+      neighbour (avoid pair-shuffle no-ops via AlreadyPairsWithNext).
+
+      The plumbing for visibility (sched-swap marker comment +
+      swaps_proc counter + -vd detail line) lives at the commit
+      site so we only spend cycles on string-formatting when a
+      swap actually fires.
+      ------------------------------------------------------------------ }
+    function TryHoistBackward(self_: TAsmScheduler; target: tai;
+                              max_back: longint): boolean;
+      var
+        walker, new_anchor: tai;
+        steps : longint;
+      begin
+        Result := false;
+        if not IsPairable(target) then
+          exit;
+        walker := target;
+        steps := 0;
+        while steps < max_back do
+          begin
+            walker := PrevEligible(walker);
+            if (walker = nil) or IsBarrier(walker) then
+              exit;
+            { Adjacent-swap safety: target moves leftwards past walker.
+              Each step we re-check; the first failing step stops the
+              walk. }
+            if HasDep(self_, walker, target) then
+              exit;
+            inc(steps);
+
+            if IsPairable(walker) and
+               CanIssueParallel(OpcodeClass(taicpu(walker).opcode),
+                                OpcodeClass(taicpu(target).opcode)) and
+               not AlreadyPairsWithNext(self_, walker) then
+              begin
+                new_anchor := walker;
+                self_.AsmL.Remove(target);
+                self_.AsmL.InsertAfter(target, new_anchor);
+                self_.AsmL.InsertAfter(
+                  tai_comment.Create(strpnew('sched-swap')),
+                  new_anchor);
+                inc(swaps_proc);
+                if CheckVerbosity(V_Debug) then
+                  Comment(V_Debug,
+                    '[scheduler] hoist: '+
+                    std_op2str[taicpu(target).opcode]+
+                    ' back '+tostr(steps)+' to pair with '+
+                    std_op2str[taicpu(new_anchor).opcode]);
+                Result := true;
+                exit;
+              end;
+          end;
+      end;
+
+
+    { ------------------------------------------------------------------
+      Main pass. Forward walk over the block; for every pairable
+      instruction whose immediate-prev eligible neighbour does NOT
+      already pair with it, try to hoist it backward up to 8 steps
+      to land next to a viable anchor.
       ------------------------------------------------------------------ }
     function TCpuPreRegallocScheduler.SchedulerPass1Cpu(var p: tai): boolean;
+      const
+        WINDOW_BACK = 8;
       var
-        i1, i2, i3: tai;
+        cur, nxt, prv: tai;
       begin
         Result := true;
 
@@ -454,79 +668,29 @@ unit schedi386;
             exit;
           end;
 
-        i1 := BlockStart;
-        while assigned(i1) and (i1 <> BlockEnd) do
+        cur := BlockStart;
+        while assigned(cur) and (cur <> BlockEnd) do
           begin
-            if (i1.typ <> ait_instruction) or IsBarrier(i1) then
+            { Cache next BEFORE we possibly mutate the list. If a hoist
+              fires, target moves backward; the list immediately after
+              `cur` is unchanged so `nxt` is still the correct
+              continuation. }
+            nxt := tai(cur.next);
+
+            if (cur.typ = ait_instruction) and
+               not IsBarrier(cur) and
+               IsPairable(cur) then
               begin
-                i1 := tai(i1.next);
-                continue;
+                prv := PrevEligible(cur);
+                { If immediate-prev is pairable AND already pairs with
+                  cur, no hoist can improve on that. }
+                if (prv = nil) or IsBarrier(prv) or
+                   not IsPairable(prv) or
+                   not CanPair(Self, prv, cur) then
+                  TryHoistBackward(Self, cur, WINDOW_BACK);
               end;
 
-            i2 := NextEligible(i1);
-            if (i2 = nil) or (i2 = BlockEnd) or IsBarrier(i2) then
-              begin
-                i1 := tai(i1.next);
-                continue;
-              end;
-
-            if not IsPairable(i1) then
-              begin
-                i1 := tai(i1.next);
-                continue;
-              end;
-
-            { i1 + i2 already pair? leave alone. }
-            if CanPair(Self, i1, i2) then
-              begin
-                i1 := tai(i1.next);
-                continue;
-              end;
-
-            { try i3 as the candidate to promote into V slot. }
-            i3 := NextEligible(i2);
-            if (i3 = nil) or (i3 = BlockEnd) or IsBarrier(i3) then
-              begin
-                i1 := tai(i1.next);
-                continue;
-              end;
-
-            if not CanPair(Self, i1, i3) then
-              begin
-                i1 := tai(i1.next);
-                continue;
-              end;
-
-            if HasDep(Self, i2, i3) then
-              begin
-                i1 := tai(i1.next);
-                continue;
-              end;
-
-            { Move i3 to sit immediately after i1 (before i2). }
-            AsmL.Remove(i3);
-            AsmL.InsertAfter(i3, i1);
-
-            { Visibility: drop a marker comment that survives into the
-              .s file so tests can grep for it, and emit a -vd line
-              describing the swap so a developer running with -vd sees
-              every reorder as it fires. }
-            AsmL.InsertAfter(tai_comment.Create(strpnew('sched-swap')), i1);
-            inc(swaps_proc);
-            if CheckVerbosity(V_Debug) then
-              Comment(V_Debug,
-                '[scheduler] swap: '+
-                std_op2str[taicpu(i1).opcode]+' | '+
-                std_op2str[taicpu(i2).opcode]+' | '+
-                std_op2str[taicpu(i3).opcode]+
-                ' -> '+
-                std_op2str[taicpu(i1).opcode]+' | '+
-                std_op2str[taicpu(i3).opcode]+' | '+
-                std_op2str[taicpu(i2).opcode]);
-
-            { Re-anchor at the moved i3 -- it might pair with the
-              instruction now after it. }
-            i1 := tai(i3.next);
+            cur := nxt;
           end;
 
         { Tell the outer walker we own the iteration. }
