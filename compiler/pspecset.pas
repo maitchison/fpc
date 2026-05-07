@@ -615,6 +615,16 @@ implementation
         typename: shortstring;
         spec: tvarspez;
         is_specparam: boolean;
+        { The parameter's declared type. Used by emit_default_for_param
+          to format the default literal (boolean keywords vs. ordinal
+          digits). nil only if the param had no usable typesym, but
+          collect_visible_params errors out before reaching that case. }
+        param_def: tdef;
+        { The parameter's default-value sym (`= <expr>' in source), or
+          nil if none. Re-emitted into the dispatch stub's signature so
+          callers can omit the optional argument; wrappers don't carry
+          defaults (the stub always passes args explicitly). }
+        default_constsym: tsym;
       end;
 
     { Append the captured body buffer into `dst' verbatim. The source
@@ -680,6 +690,8 @@ implementation
             emit_paras[count].typename := ps.vardef.typesym.realname;
             emit_paras[count].spec := ps.varspez;
             emit_paras[count].is_specparam := SameText(ps.realname, kname);
+            emit_paras[count].param_def := ps.vardef;
+            emit_paras[count].default_constsym := ps.defaultconstsym;
             inc(count);
           end;
       end;
@@ -780,6 +792,27 @@ implementation
         ppreproc_emit_punct(buf, _SEMICOLON);
       end;
 
+    { Emit `= <literal>' if the parameter has a default constsym we
+      can express. Currently only constord defaults are supported --
+      that covers boolean / integer / enum, which is all spec-set
+      meaningfully accepts. Other consttyps are silently dropped (the
+      caller is then no worse off than before this feature landed). }
+    procedure emit_default_for_param(buf: tppreproc_buf;
+                                     ds: tsym; param_def: tdef);
+      var
+        cs: tconstsym;
+      begin
+        if not assigned(ds) then
+          exit;
+        if ds.typ <> constsym then
+          exit;
+        cs := tconstsym(ds);
+        if cs.consttyp <> constord then
+          exit;
+        ppreproc_emit_punct(buf, _EQ);
+        emit_value_literal(buf, int64(cs.value.valueord), param_def);
+      end;
+
     { Emit:
         procedure <fname>(<full sig including k in source order>); inline;
         begin
@@ -803,7 +836,10 @@ implementation
         ppreproc_emit_keyword(buf, _PROCEDURE);
         ppreproc_emit_ident(buf, fname);
 
-        { Full signature -- preserves user's source order, K and all. }
+        { Full signature -- preserves user's source order, K and all,
+          including any `= <default>' the user wrote. Without the
+          default re-emitted, callers omitting the optional arg would
+          fail with parser_e_wrong_parameter_size against the stub. }
         ppreproc_emit_punct(buf, _LKLAMMER);
         for i := 0 to paras_count - 1 do
           begin
@@ -813,6 +849,8 @@ implementation
             ppreproc_emit_ident(buf, emit_paras[i].name);
             ppreproc_emit_punct(buf, _COLON);
             ppreproc_emit_ident(buf, emit_paras[i].typename);
+            emit_default_for_param(buf, emit_paras[i].default_constsym,
+                                   emit_paras[i].param_def);
           end;
         ppreproc_emit_punct(buf, _RKLAMMER);
         ppreproc_emit_punct(buf, _SEMICOLON);
@@ -867,10 +905,13 @@ implementation
         paras_count: longint;
         inject_buf: tppreproc_buf;
         inject_origin: tppreproc_origin;
-        i: longint;
+        i, j: longint;
         wrapper_name: shortstring;
         kname: shortstring;
         orig_name: shortstring;
+        spec_default: tsym;
+        spec_default_v: int64;
+        spec_default_in_set: boolean;
       begin
         { Initialise out-parameters defensively in case a helper bails. }
         paras_count := 0;
@@ -908,6 +949,46 @@ implementation
           The specialize-bearing one is flagged via is_specparam. }
         if not collect_visible_params(pd, kname, emit_paras, paras_count) then
           exit;
+
+        { Validate any default on the spec-set parameter is itself a
+          member of the set. A default outside the set would be uncatchable
+          at runtime -- the dispatch case has no `else' arm -- and silently
+          fall through. Other params' defaults are typechecked by the
+          parser at declaration time, so they don't need re-validation. }
+        spec_default := nil;
+        for i := 0 to paras_count - 1 do
+          if emit_paras[i].is_specparam then
+            begin
+              spec_default := emit_paras[i].default_constsym;
+              break;
+            end;
+        if assigned(spec_default) then
+          begin
+            if (spec_default.typ <> constsym) or
+               (tconstsym(spec_default).consttyp <> constord) then
+              begin
+                Comment(V_Error,
+                  'specialize-set: parameter "' + kname +
+                  '" default must be an ordinal constant');
+                exit;
+              end;
+            spec_default_v := int64(tconstsym(spec_default).value.valueord);
+            spec_default_in_set := false;
+            for j := 0 to high(param_entry.values) do
+              if param_entry.values[j] = spec_default_v then
+                begin
+                  spec_default_in_set := true;
+                  break;
+                end;
+            if not spec_default_in_set then
+              begin
+                Comment(V_Error,
+                  'specialize-set: parameter "' + kname +
+                  '" default value ' + tostr(spec_default_v) +
+                  ' is not in the set');
+                exit;
+              end;
+          end;
 
         { Build the injection buffer. The leading `;' satisfies
           read_proc_body's consume(_SEMICOLON) that fires right after
