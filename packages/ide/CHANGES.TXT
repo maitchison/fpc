@@ -5,6 +5,62 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24g / Compiler 3.3.6g ==
+
+  * i386 PMMX scheduler -- Path A. The post-peephole U/V reorderer
+    grew teeth in three steps:
+
+    A1: pairable-set extension. MMX integer ALU / compare / logical /
+        pack / unpack / movd / movq joined the pairable set; MMX
+        multiplier (PMUL*, PMADDWD) and shift (PSL*, PSR*) joined as
+        well, classified U-only. EMMS / FEMMS plus PUSH / POP /
+        PUSHA / POPA / ENTER / LEAVE became hard barriers (v1
+        missed those; both touch state our coarse memory model can't
+        reason about).
+
+    A2: U/V/UV classification. New `OpcodeClass' returns pc_UV /
+        pc_UOnly / pc_VOnly / pc_None per opcode; `CanIssueParallel'
+        rejects two-of-the-same-restricted-pipe pairings. The MMX
+        multiplier and shifter are pinned to U on PMMX, so two
+        adjacent PMULLWs no longer get marked as pair-able even when
+        their registers are independent.
+
+    A3: backward sliding window. v1's main loop only looked at the
+        [P, NP, P] one-step shape. Path A's `TryHoistBackward' walks
+        up to 8 eligible positions backward from each pairable
+        instruction looking for an anchor it can hoist next to,
+        skipping over NP intermediates and register-dep chains as
+        long as each adjacent-swap step is safe (HasDep clear).
+        `AlreadyPairsWithNext' suppresses no-op churn: if anchor
+        already pairs with its immediate next neighbour, hoisting
+        target there would just shuffle which adjacency carries the
+        cycle, with zero benefit and real .s diff.
+
+    Per-swap visibility carries over from 3.3.6f: each commit drops a
+    `# sched-swap' marker comment, -vd adds a one-line hoist detail
+    (target opcode, hops back, anchor opcode), and per-proc / per-
+    unit / per-compile totals still surface as before.
+
+    Four new regression tests cover the new behaviour:
+      tinlfpc_sched_pmmx_pairtable -- A2 (U-only + UV pairs across
+                                      a bswap gap; two U-onlys do
+                                      not).
+      tinlfpc_sched_window8        -- A3 (independent paddw buried 5
+                                      hops behind another paddw
+                                      via NP bswap chain hoists
+                                      back).
+      tinlfpc_sched_mmx_arith      -- A1 (port of the original two-
+                                      MMX-chain shape; A1+A3 form
+                                      at least one new pair).
+      tinlfpc_sched_no_churn       -- A3 churn-guard (every pair
+                                      already adjacent; expect
+                                      zero markers).
+
+    test-lite gains %SCHED_SWAPS_MIN=N and %SCHED_SWAPS_MAX=N
+    directives for range assertions (the existing %SCHED_SWAPS=N
+    keeps its exact-match semantics).
+
+
 == IDE 1.0.24f / Compiler 3.3.6f ==
 
   * i386 PMMX scheduler now reports what it did. Each successful
