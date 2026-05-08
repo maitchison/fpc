@@ -459,9 +459,16 @@ end;
 
 {$ifndef ALLPACKAGES}
 begin
+  { Register the IDE's custom command-line options BEFORE the first
+    reference to `Installer'. Reading `Installer' triggers
+    DefInstaller := InstallerClass.Create, whose constructor calls
+    AnalyzeOptions on Paramstr() -- if the custom options aren't in
+    CustomFpmakeCommandlineOptions yet, AnalyzeOptions treats them as
+    invalid arguments and halts(1). Without this reorder, --NoGDB=1
+    cannot be passed from the build script. }
+  add_ide_comandlineoptions();
   If Assigned(Installer) and not Defaults.Namespaces then
     begin
-    add_ide_comandlineoptions();
     add_ide('');
     Installer.Run;
     end;
