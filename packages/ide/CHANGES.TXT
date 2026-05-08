@@ -5,7 +5,42 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
-== IDE 1.0.24g / Compiler 3.3.6g ==
+== IDE 1.0.24h / Compiler 3.3.6h ==
+
+  * Fixed: cross-unit parser-state leak from `flag: T specialize [set]'
+    parameters that caused phantom "Identifier not found" cascades on
+    the first method body parsed in a unit compiled after the one
+    holding the specialize-set proc. The original symptom in the wild
+    was uvesadriver.pas failing to find inherited bitsPerPixel /
+    videoMemory etc. in tVesaDriver.setLogicalSize whenever a
+    yog_to_16_mmx-style specset proc was compiled earlier in the same
+    program build.
+
+    Two root causes, both addressed:
+
+    The body capture in pp_before_proc_body / pp_after_proc_body used
+    FPC's recordtoken/replaytoken token-stream machinery. When the
+    captured stream replayed inside a wrapper inject buffer, embedded
+    ST_LOADMESSAGES metadata records freed pendingstate.nextmessagerecord
+    while a stale copy of the same pointer sat in replaystack.pending;
+    the replay-end restore then double-freed it, corrupting compiler
+    state across the module boundary. The token-stream capture was
+    replaced with char-level body source-text capture (new
+    body_capture_active / body_capture_buf fields on tscannerfile,
+    hooked from readchar and readstring); the wrappers + dispatch stub
+    are pushed as one ansistring through substitutemacro, so the
+    parser re-tokenises from scratch under the surrounding module's
+    current settings -- no replay buffer, no metadata records,
+    nothing to leak.
+
+    Independently, pspecset's per-proc entries weren't removed from
+    the entries list once the wrappers were emitted. The list is
+    keyed by tprocdef pointer; freed procdef addresses got reused for
+    later modules' procdefs, and pspecset would mistake those for the
+    original specset proc and emit spurious wrappers against their
+    bodies. pspecset_remove now drops the entry at end of after-body.
+
+
 
   * i386 PMMX scheduler -- Path A. The post-peephole U/V reorderer
     grew teeth in three steps:
