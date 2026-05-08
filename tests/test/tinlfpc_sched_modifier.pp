@@ -1,16 +1,18 @@
-{ %OPT=-OoSCHEDULE -OoNOAUTOSCHEDASM -OpPENTIUMMMX -O2 -Si }
+{ %OPT=-OoSCHEDULE -OpPENTIUMMMX -O2 -Si }
 { %RESULT=0 }
 {
-  Verifies the `schedule` proc modifier opts a pure assembler proc
-  in to the i386 PMMX scheduler under the legacy semantics
-  (-OoNOAUTOSCHEDASM). Without the modifier AND with the auto rule
-  off, psub.pas bypasses the scheduler for `pi_is_assembler` procs;
-  with the modifier the scheduler runs over the body. Semantics must
-  be unchanged.
+  Verifies the `schedule` proc modifier still works as a force-on
+  override for pure-asm procs under the unified $schedule switch.
+  Under the new model -OoSCHEDULE alone schedules pure-asm procs
+  too, so the modifier is functionally a no-op when the global
+  switch is on -- but it remains meaningful when callers compile
+  with -OoSCHEDULE off (or {$schedule off} active around the proc):
+  the modifier still flips scheduling on for that one proc.
 
-  Without the -OoNOAUTOSCHEDASM opt-out (default behaviour), pure-asm
-  procs are auto-scheduled too, so the `mix_noopt' bypass below would
-  no longer hold -- see tinlfpc_sched_modifier_auto for that path.
+  This test exercises the global-on case end-to-end. Both bodies
+  must produce the same numeric result regardless of scheduling
+  decisions; the body has no reorderable instructions (eax+flag
+  cascade) so no swap fires either way.
 
   ABI: under FPC's go32v2/Win32 register convention, the first int
   param sits in EAX and the second in EDX, so we accumulate into
@@ -20,9 +22,7 @@ program tinlfpc_sched_modifier;
 
 {$asmmode intel}
 
-{ Pure asm proc with the `schedule` modifier. The body has
-  several independent UV-pairable instructions the scheduler may
-  reorder; the result must still be 2a + b. }
+{ Pure asm proc with the `schedule` modifier. }
 function mix(a, b: longint): longint; assembler; nostackframe; schedule;
 asm
   add eax, edx           { eax := a + b }
@@ -30,8 +30,8 @@ asm
   sub eax, edx           { eax := 2a + b }
 end;
 
-{ Same logic, no modifier -- under -OoNOAUTOSCHEDASM the scheduler
-  stays out per the legacy pi_is_assembler bypass. Result must match. }
+{ Same logic, no modifier -- under the unified switch with -OoSCHEDULE
+  on, the scheduler also runs over this body. Result must match. }
 function mix_noopt(a, b: longint): longint; assembler; nostackframe;
 asm
   add eax, edx

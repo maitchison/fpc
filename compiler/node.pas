@@ -790,13 +790,14 @@ implementation
         { tnode fields }
         blocktype:=tblock_type(ppufile.getbyte);
         ppufile.getposinfo(fileinfo);
-        { tlocalswitches now exceeds 40 bits with cs_schedule_asm; on
-          disk we still use tppuset5 and pad on read. cs_schedule_asm
-          is a per-asm-block opt-in -- the value at code-gen time is
-          irrelevant after parse, so it doesn't need to round-trip. }
+        { On-disk we use tppuset5 (5 bytes) for forward-compat; the
+          in-memory tlocalswitches set is currently 4 bytes, so we
+          read the full disk record but only copy the bytes that fit
+          in memory. (sizeof(localswitches) <= sizeof(localswitches_disk)
+          is a compile-time invariant for now.) }
         ppufile.getset(localswitches_disk);
         fillchar(localswitches, sizeof(localswitches), 0);
-        move(localswitches_disk, localswitches, sizeof(localswitches_disk));
+        move(localswitches_disk, localswitches, sizeof(localswitches));
         verbosity:=ppufile.getlongint;
         ppufile.getderef(resultdefderef);
         ppufile.getset(tppuset2(flags));
@@ -814,7 +815,9 @@ implementation
         ppufile.putbyte(byte(blocktype));
         ppufile.putposinfo(fileinfo);
         fillchar(localswitches_disk, sizeof(localswitches_disk), 0);
-        move(localswitches, localswitches_disk, sizeof(localswitches_disk));
+        { write the bytes that exist in memory; the remaining
+          tppuset5 bytes stay zero (see ppuload above). }
+        move(localswitches, localswitches_disk, sizeof(localswitches));
         ppufile.putset(localswitches_disk);
         ppufile.putlongint(verbosity);
         ppufile.putderef(resultdefderef);

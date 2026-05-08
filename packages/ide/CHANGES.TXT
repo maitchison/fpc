@@ -5,6 +5,64 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24j / Compiler 3.3.6j ==
+
+  * `{$schedule on}` / `{$schedule off}` now toggles the i386 PMMX
+    scheduler uniformly across the rest of the current scope -- not
+    just for the next inline asm block. Default state is whatever
+    `-OoSCHEDULE` says on the command line (or the IDE's "PMMX asm
+    scheduler" checkbox); the directive overrides it region-by-region:
+
+        {$schedule on}
+        procedure hot_path; begin {... scheduled ...} end;
+        {$schedule off}
+        procedure cold_path; begin {... not scheduled ...} end;
+
+    The `-OoAUTOSCHEDASM` switch added in 3.3.6i is gone (it became
+    redundant under the new model). The `schedule` proc modifier on
+    pure-asm procs still works as a force-on override even when the
+    global switch is off.
+
+  * The PMMX scheduler now interleaves independent register chains
+    that share a procedure body. A program shaped like
+
+        movd  mm1, eax        }  chain A: mm1 RAW chain
+        paddw mm1, mm1; ...   }
+        movd  mm2, ebx        }  chain B: mm2 RAW chain on
+        paddw mm2, mm2; ...   }            disjoint registers
+
+    used to compile in source order (1 U/V pair, 7 cycles); the
+    scheduler now reorders it to
+
+        movd  mm1, eax | movd  mm2, ebx
+        paddw mm1, mm1 | paddw mm2, mm2
+        paddw mm1, mm1 | paddw mm2, mm2
+        paddw mm1, mm1 | paddw mm2, mm2
+
+    -- 4 U/V pairs, 4 cycles, ~3 cycles saved on PMMX hardware.
+    Internally this drops an over-eager top-level gate ("if cur
+    already pairs with prv, don't try to hoist") and iterates the
+    forward walk to fixpoint so each successful hoist can unlock
+    further ones upstream.
+
+  * The scheduler now drops a `# scheduler: <module>.<proc>: N
+    swap(s)` comment into the .s output of every proc it visits,
+    regardless of swap count. Previously a 0-swap proc was
+    indistinguishable in the .s from a proc the scheduler skipped
+    entirely; now `grep "scheduler:" foo.s` answers "did the pass
+    actually run on this proc" at a glance.
+
+  * New regression test `tinlfpc_sched_cascade_chains.pp` covers the
+    chain-A-then-chain-B interleaving case end-to-end (compile +
+    run + verify mm1=32, mm2=56). `tinlfpc_sched_asm_mmx.pp` and
+    `tinlfpc_sched_no_churn.pp` were updated -- the former now
+    asserts SCHED_SWAPS_MIN=1 since the cascade fix exposes the
+    interleaving opportunity its body always had; the latter's
+    body was rewritten to one with genuinely no reordering room
+    (4 reg-imm movs + 3 chained leas), preserving the test's role
+    as a churn-guard.
+
+
 == IDE 1.0.24i / Compiler 3.3.6i ==
 
   * Inline asm blocks AND pure-asm procs are now scheduled by default

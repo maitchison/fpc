@@ -543,16 +543,27 @@ unit schedi386;
       var
         modname, procname : shortstring;
       begin
+        modname := '';
+        if assigned(current_module) and assigned(current_module.modulename) then
+          modname := current_module.modulename^;
+        procname := '?';
+        if assigned(current_procinfo) and
+           assigned(current_procinfo.procdef) then
+          procname := current_procinfo.procdef.fullprocname(false);
+
+        { Always emit a per-proc visibility marker into the asm stream
+          regardless of swap count. Without this, "scheduler ran but had
+          nothing to swap" is indistinguishable from "scheduler skipped
+          this proc entirely" -- the .s output looks identical to a
+          non-scheduled build. Grep for "scheduler:" in .s to confirm
+          the pass actually visited a given proc. }
+        if assigned(AsmL) then
+          AsmL.Concat(tai_comment.Create(strpnew(
+            'scheduler: '+modname+'.'+procname+': '+
+            tostr(swaps_proc)+' swap(s)')));
+
         if swaps_proc > 0 then
           begin
-            modname := '';
-            if assigned(current_module) and assigned(current_module.modulename) then
-              modname := current_module.modulename^;
-            procname := '?';
-            if assigned(current_procinfo) and
-               assigned(current_procinfo.procdef) then
-              procname := current_procinfo.procdef.fullprocname(false);
-
             { Unit boundary: when the module changes between two procs
               that both produced swaps, flush the prior unit's running
               tally before re-zeroing. The very last unit's tally is
@@ -649,15 +660,29 @@ unit schedi386;
 
     { ------------------------------------------------------------------
       Main pass. Forward walk over the block; for every pairable
-      instruction whose immediate-prev eligible neighbour does NOT
-      already pair with it, try to hoist it backward up to 8 steps
-      to land next to a viable anchor.
+      instruction try to hoist it backward up to 8 steps to land next
+      to a viable anchor. We unconditionally call TryHoistBackward and
+      let the no-op-churn check inside (AlreadyPairsWithNext) do the
+      rejecting -- the previous "if prv already pairs with cur, skip"
+      gate suppressed legitimate cascades, where hoisting cur upstream
+      replaces one pair with two and still leaves prv able to pair with
+      cur's old successor.
+
+      We iterate the forward walk to fixpoint: each successful hoist
+      can unlock further ones upstream of the new position. Each
+      hoist commits only when it would create at least one new pair
+      (CanPair && !AlreadyPairsWithNext on the anchor), so total pairs
+      monotonically increase and the loop terminates in O(N) hoists.
+      MAX_PASSES is a safety net only.
       ------------------------------------------------------------------ }
     function TCpuPreRegallocScheduler.SchedulerPass1Cpu(var p: tai): boolean;
       const
         WINDOW_BACK = 8;
+        MAX_PASSES  = 16;
       var
-        cur, nxt, prv: tai;
+        cur, nxt: tai;
+        passes  : longint;
+        changed : boolean;
       begin
         Result := true;
 
@@ -668,30 +693,28 @@ unit schedi386;
             exit;
           end;
 
-        cur := BlockStart;
-        while assigned(cur) and (cur <> BlockEnd) do
-          begin
-            { Cache next BEFORE we possibly mutate the list. If a hoist
-              fires, target moves backward; the list immediately after
-              `cur` is unchanged so `nxt` is still the correct
-              continuation. }
-            nxt := tai(cur.next);
+        passes := 0;
+        repeat
+          changed := false;
+          cur := BlockStart;
+          while assigned(cur) and (cur <> BlockEnd) do
+            begin
+              { Cache next BEFORE we possibly mutate the list. If a
+                hoist fires, target moves backward; the list immediately
+                after `cur` is unchanged so `nxt` is still the correct
+                continuation. }
+              nxt := tai(cur.next);
 
-            if (cur.typ = ait_instruction) and
-               not IsBarrier(cur) and
-               IsPairable(cur) then
-              begin
-                prv := PrevEligible(cur);
-                { If immediate-prev is pairable AND already pairs with
-                  cur, no hoist can improve on that. }
-                if (prv = nil) or IsBarrier(prv) or
-                   not IsPairable(prv) or
-                   not CanPair(Self, prv, cur) then
-                  TryHoistBackward(Self, cur, WINDOW_BACK);
-              end;
+              if (cur.typ = ait_instruction) and
+                 not IsBarrier(cur) and
+                 IsPairable(cur) then
+                if TryHoistBackward(Self, cur, WINDOW_BACK) then
+                  changed := true;
 
-            cur := nxt;
-          end;
+              cur := nxt;
+            end;
+          inc(passes);
+        until (not changed) or (passes >= MAX_PASSES);
 
         { Tell the outer walker we own the iteration. }
         p := BlockEnd;
