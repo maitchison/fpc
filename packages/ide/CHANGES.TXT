@@ -5,6 +5,37 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24m / Compiler 3.3.6m ==
+
+  * `param: T specialize [...]' now accepts enum-typed parameters.
+    Previously the modifier was documented as accepting any ordinal
+    type, but only `boolean' and integer values produced a compilable
+    dispatch stub -- enum lists hit "Constant and CASE types do not
+    match" because the synthesized case-arms emitted raw integers
+    instead of enum element identifiers. The compiler now emits the
+    matching element name for each value, mirroring the existing
+    boolean special case:
+
+        type
+          tMode = (mOff, mOn, mDebug);
+
+        procedure run(m: tMode specialize [mOff, mOn, mDebug];
+                      n: longint);
+        begin
+          case m of
+            mOff:   writeln('off ', n);
+            mOn:    writeln('on ', n);
+            mDebug: writeln('dbg ', n);
+          end;
+        end;
+
+    Constant call sites still inline to a direct wrapper call; runtime
+    call sites still produce the case-table dispatch.
+
+    No PPU format change -- units stamp 336 still applies, all 3.3.6*
+    installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24l / Compiler 3.3.6l ==
 
   * Shift+Tab (Peek definition) and Ctrl+Enter (Go to definition) now
