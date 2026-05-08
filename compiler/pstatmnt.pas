@@ -1110,16 +1110,12 @@ implementation
              hl:=asmreader.assemble as TAsmList;
              if (not hl.empty) then
                begin
-                 (* mark boundaries of assembler block, this is necessary for optimizer.
-                    The start marker carries the schedule opt-in for the i386
-                    PMMX scheduler. Two paths flip it on:
-                      - explicit {$schedule on} (cs_schedule_asm in localswitches)
-                      - the auto-on rule: -OoSCHEDULE active AND
-                        -OoAUTOSCHEDASM (default ON) not negated. *)
-                 hl.insert(tai_marker.CreateAsmBlock(mark_asmblockstart,
-                   (cs_schedule_asm in current_settings.localswitches) or
-                   ((cs_opt_scheduler in current_settings.optimizerswitches) and
-                    (cs_opt_schedule_asm_auto in current_settings.optimizerswitches))));
+                 { mark boundaries of assembler block, this is necessary
+                   for optimizer.  No per-block schedule flag any more --
+                   the unified $schedule directive toggles cs_opt_scheduler
+                   itself, and the proc-level gate decides whether the
+                   scheduler runs over the body (asm blocks included). }
+                 hl.insert(tai_marker.create(mark_asmblockstart));
                  hl.concat(tai_marker.create(mark_asmblockend));
                end;
              asmstat:=casmnode.create(hl);
@@ -1366,14 +1362,10 @@ implementation
         until nesting<0;
         tokenbuf.free;
         tokenbuf := nil;
-        (* mark boundaries of assembler block, this is necessary for optimizer.
-           The start marker carries the schedule opt-in for the i386
-           PMMX scheduler. Same auto-on rule as the standard asm-statement
-           path above (see comment there). *)
-        hl.insert(tai_marker.CreateAsmBlock(mark_asmblockstart,
-          (cs_schedule_asm in current_settings.localswitches) or
-          ((cs_opt_scheduler in current_settings.optimizerswitches) and
-           (cs_opt_schedule_asm_auto in current_settings.optimizerswitches))));
+        { mark boundaries of assembler block, this is necessary for
+          optimizer.  No per-block schedule flag any more -- see the
+          asm-statement path above. }
+        hl.insert(tai_marker.create(mark_asmblockstart));
         hl.concat(tai_marker.create(mark_asmblockend));
         { Mark procedure that it has assembler blocks }
         include(current_procinfo.flags,pi_has_assembler_block);

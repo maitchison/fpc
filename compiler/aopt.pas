@@ -338,34 +338,16 @@ Unit aopt;
 
 
     procedure TAsmScheduler.Optimize;
-      Var
-        HP: tai;
       Begin
+        { Unified $schedule switch: the proc-level gate in psub.pas has
+          already filtered on cs_opt_scheduler, so once we're here we
+          schedule the whole proc body uniformly -- Pascal-emitted code
+          and inline asm blocks alike, no per-block opt-in. }
         BlockStart := tai(AsmL.First);
         While Assigned(BlockStart) Do
           Begin
-            { Peephole optimizations }
             SchedulerPass1;
-            { continue where we left off, BlockEnd is either the start of an }
-            { assembler block or nil}
-            BlockStart:=BlockEnd;
-            While Assigned(BlockStart) And
-                  (BlockStart.typ = ait_Marker) And
-                  (tai_Marker(BlockStart).Kind = mark_AsmBlockStart) And
-                  not tai_Marker(BlockStart).schedule_asm Do
-              Begin
-                { we stopped at an assembler block that did NOT opt in
-                  via $schedule on, so skip it    }
-                While GetNextInstruction(BlockStart, BlockStart) And
-                      ((BlockStart.Typ <> Ait_Marker) Or
-                       (tai_Marker(Blockstart).Kind <> mark_AsmBlockEnd)) Do;
-                { blockstart now contains a tai_marker(mark_AsmBlockEnd) }
-                If not(GetNextInstruction(BlockStart, HP) And
-                   ((HP.typ <> ait_Marker) Or
-                    (Tai_Marker(HP).Kind <> mark_AsmBlockStart))) Then
-                  { skip the next assembler block }
-                  blockStart := hp;
-              End
+            BlockStart := BlockEnd;
           End;
       End;
 

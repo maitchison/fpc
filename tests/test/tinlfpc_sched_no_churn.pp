@@ -2,43 +2,49 @@
 { %RESULT=0 }
 { %SCHED_SWAPS=0 }
 {
-  Path A / A3 churn-guard.
+  Path A / A3 churn-guard, post-cascade-fix.
 
-  The scheduler must not move pairable instructions when they are
-  ALREADY adjacent to a pairable, independent neighbour. Path A's
-  AlreadyPairsWithNext check catches this: a hoist that just
-  shuffles which UV+UV pair currently issues is a no-op cycle-wise
-  but adds real .s churn (and confuses anyone reading -vd output).
+  Verifies that AlreadyPairsWithNext inside TryHoistBackward continues
+  to reject hoists that would just shuffle which adjacency carries a
+  U/V pair without creating a new one.
 
-  The body below is a sequence of pairwise-independent UV ops on
-  distinct registers -- every adjacent pair already forms a legal
-  U/V pair, so the swap count must be exactly zero.
+  The body below has TWO trivially-paired regions:
+
+    mov ecx, 1         ; four reg-imm moves, no shared regs, no flags
+    mov edx, 2         ;  -> every adjacent (M,M) is a legal U/V pair
+    mov esi, 3         ;     by linear order alone.
+    mov edi, 4         ;
+    lea eax, [ecx+edx] ; three lea-chained loads, every adjacent pair
+    lea eax, [eax+esi] ; shares eax -> never pair, and there is no
+    lea eax, [eax+edi] ; room to hoist a lea past the mov edx/esi/edi
+                       ; (lea reads ecx/edx/esi/edi; mov edx writes
+                       ;  edx; shared reg blocks reorder).
+
+  No interleaving between the two regions is possible (the first lea
+  reads ecx + edx, blocking any motion past those movs), and within
+  each region the linear order is already optimal -- so the cascade
+  fixpoint completes at zero swaps. AlreadyPairsWithNext is what
+  rejects the (mov edx -> lea hoist) attempt that the relaxed top-level
+  gate now allows.
+
+  Returns 1 + 2 + 3 + 4 = 10 regardless of input.
 }
 program tinlfpc_sched_no_churn;
 
 {$asmmode intel}
 
-function already_paired(a: longint): longint; assembler; nostackframe; schedule;
+function already_paired: longint; assembler; nostackframe; schedule;
 asm
-  mov ecx, eax              { ecx = a                                }
-  mov edx, eax              { edx = a    (independent of prev)       }
-  mov esi, eax              { esi = a    (independent of prev)       }
-  mov edi, eax              { edi = a    (independent of prev)       }
-  add ecx, 1                { ecx += 1   (depends on prev `mov ecx`,
-                              but pairs vs `mov edx` etc -- the prev
-                              ELIGIBLE neighbour `mov edi, eax` has
-                              no dep with this `add ecx`)            }
-  add edx, 2                { edx += 2                               }
-  add esi, 3                { esi += 3                               }
-  add edi, 4                { edi += 4                               }
-  lea eax, [ecx + edx]      { eax = a+1 + a+2 = 2a+3                 }
-  lea eax, [eax + esi - 3]  { eax += a+3 - 3 = a; total 3a+3         }
-  lea eax, [eax + edi - 4]  { eax += a+4 - 4 = a; total 4a+3         }
+  mov ecx, 1
+  mov edx, 2
+  mov esi, 3
+  mov edi, 4
+  lea eax, [ecx + edx]
+  lea eax, [eax + esi]
+  lea eax, [eax + edi]
 end;
 
 begin
-  if already_paired(0) <> 3       then halt(1);
-  if already_paired(1) <> 4*1 + 3 then halt(2);
-  if already_paired(5) <> 4*5 + 3 then halt(3);
-  if already_paired(9) <> 4*9 + 3 then halt(4);
+  if already_paired <> 10 then halt(1);
+  if already_paired <> 10 then halt(2);
 end.

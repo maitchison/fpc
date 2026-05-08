@@ -2427,9 +2427,13 @@ implementation
 
 {$ifndef NoOpt}
 {$ifndef i386}
-            if (cs_opt_scheduler in current_settings.optimizerswitches) and
-              { do not optimize pure assembler procedures }
-              not(pi_is_assembler in flags) then
+            (* Unified $schedule switch: cs_opt_scheduler in
+               optimizerswitches (set by -OoSCHEDULE on the command
+               line, or by a $schedule on directive in source) is the
+               single gate.  po_schedule_asm on a pure-asm proc
+               forces it on regardless. *)
+            if (cs_opt_scheduler in current_settings.optimizerswitches) or
+               (po_schedule_asm in current_procinfo.procdef.procoptions) then
               preregallocschedule(aktproccode);
 {$endif i386}
 {$endif NoOpt}
@@ -2524,15 +2528,11 @@ implementation
                 { schedule after assembler optimization, it could have brought up
                   new schedule possibilities. On i386 this hook is post-RA
                   (the i386 scheduler reasons about real registers / U-V pairing
-                  on PMMX); on other targets it follows the pre-RA hook above.
-                  Pure assembler procedures opt in via either:
-                    - `schedule` proc modifier (po_schedule_asm), or
-                    - the auto rule (cs_opt_schedule_asm_auto, default ON);
-                      -OoNOAUTOSCHEDASM falls back to modifier-only. }
-                if (cs_opt_scheduler in current_settings.optimizerswitches) and
-                   (not(pi_is_assembler in flags) or
-                    (po_schedule_asm in current_procinfo.procdef.procoptions) or
-                    (cs_opt_schedule_asm_auto in current_settings.optimizerswitches)) then
+                  on PMMX). Unified $schedule switch: cs_opt_scheduler is the
+                  single gate; po_schedule_asm on a pure-asm proc forces it on
+                  regardless of the global switch. }
+                if (cs_opt_scheduler in current_settings.optimizerswitches) or
+                   (po_schedule_asm in current_procinfo.procdef.procoptions) then
                   preregallocschedule(aktproccode);
               end;
 {$endif NoOpt}

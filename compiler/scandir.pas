@@ -1587,13 +1587,25 @@ unit scandir;
       end;
 
     procedure dir_schedule;
-      (* $schedule on/off -- per-block opt-in for the i386 PMMX
-         scheduler on inline asm blocks. Place immediately before an
-         `asm ... end;` block. The flag is sampled at parse time and
-         stamped onto the resulting mark_AsmBlockStart marker; the
-         scheduler then processes the block instead of skipping it. *)
+      (* $schedule on/off -- toggles the i386 PMMX scheduler for the
+         remainder of the current scope. Equivalent to
+         {$optimization scheduler+/-}; affects every following procedure
+         body (Pascal or pure-asm) and every inline asm block within
+         them. Default state is set by -OoSCHEDULE on the command line. *)
+      var
+        state : char;
+        sw    : toptimizerswitches;
       begin
-        do_localswitch(cs_schedule_asm);
+        state := current_scanner.readstate;
+        if state in ['-','+'] then
+          begin
+            sw := current_settings.optimizerswitches;
+            if state = '-' then
+              exclude(sw, cs_opt_scheduler)
+            else
+              include(sw, cs_opt_scheduler);
+            recordpendingoptimizerswitches(sw);
+          end;
       end;
 
     function get_peflag_const(const ident:string;error:longint):longint;
