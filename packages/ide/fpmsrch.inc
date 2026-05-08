@@ -244,7 +244,7 @@ procedure TIDEApp.DoJumpToAsm;
   on the first emitted line >= the current line. }
 var
   EditorWin, AsmWin : PSourceWindow;
-  SrcFile, AsmFile, AsmName, ExePath : string;
+  SrcFile, AsmFile, AsmName, ExePath, ParentSrc : string;
   D : DirStr;
   N : NameStr;
   E : ExtStr;
@@ -275,6 +275,28 @@ begin
 
   SrcFile := FExpand(SrcFile);
   FSplit(SrcFile,D,N,E);
+  { Include files don't have their own .s -- the assembler emits a single .s
+    per compiled unit, with `# [FILE.INC]` markers identifying include-file
+    spans. Look up the parent unit via the browser-info collector and aim
+    the .s lookup at it; the per-source marker matching below handles the
+    rest. Falls back to the old FOO.S behaviour when no parent is found
+    (e.g. browser info hasn't been built yet). }
+  if (UpcaseStr(E) = '.INC') then
+    begin
+      ParentSrc := DefIndexFindIncludeParent(SrcFile);
+      if ParentSrc <> '' then
+        FSplit(FExpand(ParentSrc), D, N, E)
+      else if not DefIndexAvailable then
+        begin
+          ErrorBox('Jump to asm: no browser info loaded -- compile the unit '+
+                   'that includes '+NameAndExtOf(SrcFile)+
+                   ' with Options|Compiler|Browser turned on, then retry.', nil);
+          Exit;
+        end;
+      { If parent not found but browser info IS loaded, fall through with the
+        original .inc-derived AsmName -- the user will get the usual "no .s"
+        error and can investigate. }
+    end;
   AsmName := N+'.s';
   ExePath := GetExePath;
 

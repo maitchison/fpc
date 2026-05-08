@@ -48,6 +48,14 @@ type
 function DefIndexAvailable: boolean;
 { True iff a successful compile-with-browser-info has populated BrowCol. }
 
+function DefIndexFindIncludeParent(const FileName: string): string;
+{ Given the path/name of an include file, returns the path of the parent
+  unit's main source (the .pas/.pp the compiler actually compiled, which is
+  what the assembler emits a .s for). Returns '' if no parent is known --
+  no browser info loaded, or this file is not an include of any seen unit.
+  Match is by basename, case-insensitive; if multiple modules include a
+  file with this basename, the first one wins. }
+
 function DefIndexResolve(const Name: string): PDefMatchList;
 { Returns a newly-allocated list of matches; caller must Dispose it.
   Returns nil if no symbol info is loaded. Returns an empty list if
@@ -204,6 +212,39 @@ end;
 function DefIndexAvailable: boolean;
 begin
   DefIndexAvailable:=BrowCol.Modules<>nil;
+end;
+
+function DefIndexFindIncludeParent(const FileName: string): string;
+var
+  i, j: sw_integer;
+  M: PModuleSymbol;
+  P: PString;
+  Target: string;
+begin
+  DefIndexFindIncludeParent:='';
+  if not DefIndexAvailable then exit;
+  if FileName='' then exit;
+  Target:=UpcaseStr(NameAndExtOf(FileName));
+  if Target='' then exit;
+  for i:=0 to BrowCol.Modules^.Count-1 do
+    begin
+      M:=PModuleSymbol(BrowCol.Modules^.At(i));
+      if (M=nil) or (M^.MainSource=nil) or (M^.SourceFiles=nil) then continue;
+      { The main source itself is in SourceFiles, so the basename loop also
+        catches the case where the editor file IS the main source.  Skip
+        that match -- the caller cares about includes only. }
+      if UpcaseStr(NameAndExtOf(M^.MainSource^))=Target then continue;
+      for j:=0 to M^.SourceFiles^.Count-1 do
+        begin
+          P:=PString(M^.SourceFiles^.At(j));
+          if P=nil then continue;
+          if UpcaseStr(NameAndExtOf(P^))=Target then
+            begin
+              DefIndexFindIncludeParent:=M^.MainSource^;
+              exit;
+            end;
+        end;
+    end;
 end;
 
 procedure AddSymMatch(List: PDefMatchList; S: PSymbol; const OwnerName: string);

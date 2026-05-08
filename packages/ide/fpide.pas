@@ -207,7 +207,7 @@ uses
   FPDebug,FPRegs,
 {$endif}
   FPRedir,
-  FPDesk,FPCodCmp,FPCodTmp;
+  FPDesk,FPCodCmp,FPCodTmp,FPDefIdx;
 
 type
    TTargetedEvent = record
