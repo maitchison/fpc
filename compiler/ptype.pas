@@ -60,6 +60,12 @@ interface
       systems.systems_typed_constants_node_init) }
     procedure add_typedconst_init_routine(def: tabstractrecorddef);
 
+    { synthesise a class operator Initialize whose body assigns the field
+      defaults captured by read_record_fields. Called at the end of a
+      `managed record' declaration; no-op if no field has a default. Errors
+      if the user already declared an Initialize operator. }
+    procedure add_record_field_defaults_routine(def: tabstractrecorddef);
+
     { parse hint directives (platform, deprecated, ...) for a procdef }
     procedure maybe_parse_hint_directives(pd:tprocdef);
 
@@ -1029,6 +1035,10 @@ implementation
 {$endif}
                 if target_info.system in systems_typed_constants_node_init then
                   add_typedconst_init_routine(current_structdef);
+                { synthesise class operator Initialize from `field: T = expr'
+                  defaults captured during read_record_fields. No-op unless the
+                  record is `managed record' AND has at least one field default. }
+                add_record_field_defaults_routine(current_structdef);
                 consume(_END);
                 break;
               end;
@@ -1038,8 +1048,11 @@ implementation
         until false;
       end;
 
-    { reads a record declaration }
-    function record_dec(const n:tidstring;recsym:tsym;genericdef:tstoreddef;genericlist:tfphashobjectlist):tdef;
+    { reads a record declaration. ismanaged=true marks the recorddef with
+      df_managed_record so read_record_fields will accept `field: T = expr'
+      defaults and add_record_field_defaults_routine will synthesise the
+      class operator Initialize at end-of-record. }
+    function record_dec(const n:tidstring;recsym:tsym;genericdef:tstoreddef;genericlist:tfphashobjectlist;ismanaged:boolean):tdef;
       var
          olddef : tdef;
 
@@ -1098,6 +1111,10 @@ implementation
              current_structdef:=crecorddef.create(recst.name^,recst);
            end;
          result:=current_structdef;
+         { mark managed before parsing the body so read_record_fields knows it's
+           allowed to capture field defaults }
+         if ismanaged then
+           include(current_structdef.defoptions,df_managed_record);
          { insert in symtablestack }
          symtablestack.push(recst);
 
@@ -1815,6 +1832,7 @@ implementation
         enumdupmsg, first, is_specialize : boolean;
         oldlocalswitches : tlocalswitches;
         bitpacking: boolean;
+        is_managed: boolean;
         stitem: psymtablestackitem;
         sym: tsym;
         st: tsymtable;
@@ -1822,10 +1840,22 @@ implementation
          def:=nil;
          v:=0;
          l:=0;
+         is_managed:=false;
          if assigned(newsym) then
            name:=newsym.RealName
          else
            name:='';
+         { contextual `managed' modifier in front of `record' / `packed record'
+           opts the record into the managed-record runtime so field defaults
+           (`field: T = expr') can synthesise a class operator Initialize. }
+         if (current_scanner.token=_ID) and (current_scanner.idtoken=_MANAGED) and
+            (m_advanced_records in current_settings.modeswitches) then
+           begin
+             consume(_ID);
+             is_managed:=true;
+             if not (current_scanner.token in [_RECORD,_PACKED,_BITPACKED]) then
+               Message(parser_e_managed_modifier_only_for_records);
+           end;
          { type a = type ..,; syntax is allowed only with type syms and apparently helpers, see below }
          if hadtypetoken and
              (
@@ -1963,11 +1993,13 @@ implementation
                 consume(current_scanner.token);
                 if (current_scanner.idtoken=_HELPER) and (m_advanced_records in current_settings.modeswitches) then
                   begin
+                    if is_managed then
+                      Message(parser_e_managed_modifier_only_for_records);
                     consume(_HELPER);
                     def:=object_dec(odt_helper,name,newsym,genericdef,genericlist,nil,ht_record);
                   end
                 else
-                  def:=record_dec(name,newsym,genericdef,genericlist);
+                  def:=record_dec(name,newsym,genericdef,genericlist,is_managed);
               end;
             _PACKED,
             _BITPACKED:
@@ -1976,6 +2008,14 @@ implementation
                   (cs_bitpacking in current_settings.localswitches) or
                   (current_scanner.token = _BITPACKED);
                 consume(current_scanner.token);
+                { allow `packed managed record' as an alternative spelling of
+                  `managed packed record' }
+                if (current_scanner.token=_ID) and (current_scanner.idtoken=_MANAGED) and
+                   (m_advanced_records in current_settings.modeswitches) then
+                  begin
+                    consume(_ID);
+                    is_managed:=true;
+                  end;
                 if current_scanner.token=_ARRAY then
                   array_dec(bitpacking,genericdef,genericlist)
                 else if current_scanner.token=_SET then
@@ -1993,17 +2033,21 @@ implementation
                     case current_scanner.token of
                       _CLASS :
                         begin
+                          if is_managed then
+                            Message(parser_e_managed_modifier_only_for_records);
                           consume(_CLASS);
                           def:=object_dec(odt_class,name,newsym,genericdef,genericlist,nil,ht_none);
                         end;
                       _OBJECT :
                         begin
+                          if is_managed then
+                            Message(parser_e_managed_modifier_only_for_records);
                           consume(_OBJECT);
                           def:=object_dec(odt_object,name,newsym,genericdef,genericlist,nil,ht_none);
                         end;
                       else begin
                         consume(_RECORD);
-                        def:=record_dec(name,newsym,genericdef,genericlist);
+                        def:=record_dec(name,newsym,genericdef,genericlist,is_managed);
                       end;
                     end;
                     current_settings.packrecords:=oldpackrecords;
@@ -2208,6 +2252,65 @@ implementation
           pd.synthetickind:=tsk_tcinit
         else
           internalerror(2011040207);
+        restore_scanner(sstate);
+      end;
+
+
+    procedure add_record_field_defaults_routine(def: tabstractrecorddef);
+      var
+        sstate: tscannerstate;
+        pd: tprocdef;
+        i: longint;
+        sym: tsym;
+        has_defaults: boolean;
+        recst: trecordsymtable;
+      begin
+        if def.typ<>recorddef then
+          exit;
+        if not (df_managed_record in def.defoptions) then
+          exit;
+        recst:=trecordsymtable(def.symtable);
+        { scan fields for any captured default values }
+        has_defaults:=false;
+        for i:=0 to recst.symlist.count-1 do
+          begin
+            sym:=tsym(recst.symlist[i]);
+            if (sym.typ=fieldvarsym) and assigned(tfieldvarsym(sym).defaultvaltext) then
+              begin
+                has_defaults:=true;
+                break;
+              end;
+          end;
+        if not has_defaults then
+          exit;
+        { user already declared a class operator Initialize? -- v1 errors out
+          rather than try to merge with a user-supplied body }
+        if mop_initialize in recst.managementoperators then
+          begin
+            Message(parser_e_field_default_conflicts_initialize);
+            { drop the captured defaults so we don't synthesise anything later
+              and don't leak the strings either }
+            for i:=0 to recst.symlist.count-1 do
+              begin
+                sym:=tsym(recst.symlist[i]);
+                if sym.typ=fieldvarsym then
+                  stringdispose(tfieldvarsym(sym).defaultvaltext);
+              end;
+            exit;
+          end;
+        if not assigned(def.typesym) then
+          internalerror(2026050901);
+        replace_scanner('record_field_defaults',sstate);
+        if str_parse_method_dec('operator Initialize(var __fpc_rfd_self: '+def.typesym.realname+');',
+                                potype_operator,true,def,pd) then
+          begin
+            pd.synthetickind:=tsk_record_field_defaults;
+            { record the symtable's management-operator membership the same
+              way an explicit `class operator Initialize' would }
+            recst.includemanagementoperator(mop_initialize);
+          end
+        else
+          internalerror(2026050902);
         restore_scanner(sstate);
       end;
 

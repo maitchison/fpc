@@ -1721,6 +1721,14 @@ parser_e_type_alread_forward=03373_E_Duplicate forward type declaration: $1
 parser_e_no_suitable_newinstance_method_found=03374_E_No suitable NewInstance method for class instance creation found
 % To create a new instance of a class, a suitable NewInstance (like \var{TObject.NewInstance}) method must be found. The symbol name NewInstance
 % might not be used for other purposes than to create a new instance of a class.
+parser_e_managed_modifier_only_for_records=03375_E_The "managed" modifier is only allowed in front of "record"
+% \var{managed} opts a record into the managed-record runtime so field defaults can synthesise a class operator Initialize. It cannot precede a class, object, or other type.
+parser_e_field_default_requires_managed_record=03376_E_Field default values require "managed record"
+% A field declaration of the form \var{name: type = expr} is only accepted in a record declared as \var{managed record}, because it implicitly synthesises a \var{class operator Initialize} that promotes the record into the managed-record runtime.
+parser_e_field_default_too_complex=03377_E_Field default value must be a simple constant literal
+% v1 of field defaults supports only literal constants (integers, hex literals, characters, strings, true/false, nil), optionally with a unary minus prefix on numerics.
+parser_e_field_default_conflicts_initialize=03378_E_Cannot combine field defaults with explicit "class operator Initialize"
+% A managed record either uses field defaults to drive the synthesised Initialize, or declares the operator explicitly. Mixing the two is not yet supported.
 %
 % \end{description}
 %

@@ -544,6 +544,46 @@ implementation
       str_parse_method_impl(str,pd,false);
     end;
 
+
+  procedure implement_record_field_defaults(pd: tprocdef);
+    { synthesise the body for a class operator Initialize previously emitted by
+      add_record_field_defaults_routine. The var parameter is named
+      __fpc_rfd_self (matches the dec). For each field with a captured default
+      value, emit `__fpc_rfd_self.&fname := <expr>;'. After emission the captured
+      strings are freed so they don't linger in the symtable. }
+    var
+      struct: tabstractrecorddef;
+      str: ansistring;
+      i: longint;
+      sym: tsym;
+      fsym: tfieldvarsym;
+    begin
+      if not(pd.struct.typ=recorddef) then
+        internalerror(2026050903);
+      struct:=pd.struct;
+      if not assigned(struct.typesym) then
+        internalerror(2026050904);
+      str:='begin ';
+      for i:=0 to struct.symtable.symlist.count-1 do
+        begin
+          sym:=tsym(struct.symtable.symlist[i]);
+          if (sym.typ=fieldvarsym) and assigned(tfieldvarsym(sym).defaultvaltext) then
+            begin
+              fsym:=tfieldvarsym(sym);
+              str:=str+'__fpc_rfd_self.&'+fsym.realname+':='+fsym.defaultvaltext^+';';
+            end;
+        end;
+      str:=str+'end;';
+      str_parse_method_impl(str,pd,true);
+      { release the captured texts -- they're no longer needed }
+      for i:=0 to struct.symtable.symlist.count-1 do
+        begin
+          sym:=tsym(struct.symtable.symlist[i]);
+          if sym.typ=fieldvarsym then
+            stringdispose(tfieldvarsym(sym).defaultvaltext);
+        end;
+    end;
+
   procedure implement_empty(pd: tprocdef);
     var
       str: ansistring;
@@ -1322,6 +1362,8 @@ implementation
               implement_record_deepcopy(pd);
             tsk_record_initialize:
               implement_record_initialize(pd);
+            tsk_record_field_defaults:
+              implement_record_field_defaults(pd);
             tsk_empty,
             { special handling for this one is done in tnodeutils.wrap_proc_body }
             tsk_tcinit:
