@@ -5,6 +5,42 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24l / Compiler 3.3.6l ==
+
+  * Shift+Tab (Peek definition) and Ctrl+Enter (Go to definition) now
+    follow symbols whose declarations live in include (.inc) files. The
+    browser-info collector previously recorded only the bare basename
+    for each symbol's defining position, so the editor could only open
+    the file when its directory happened to be on a -Fu/-Fi search path
+    -- a procedure declared in shared\poly_ref.inc and included from
+    video\foo.pas would come back as "symbol not found". The full path
+    is now stored alongside the line/column, so:
+
+        (in foo.pas)
+        {$I shared\poly_ref.inc}
+        ...
+        polyDraw_REF(...);     <- cursor here, Shift+Tab pops the peek
+                                  view at shared\poly_ref.inc:2
+
+    Same prerequisite as before: at least one successful compile with
+    Options|Compiler|Browser turned on (or `-b` on the command line).
+
+  * Alt+A (Search | Jump to asm) now works from inside an include file.
+    The assembler emits one .s per compiled unit, with `# [FILE.INC]`
+    markers identifying include-file spans; previously the IDE looked
+    for FOO.S when the editor was on FOO.INC and gave up. The .s lookup
+    now consults browser info to find the parent unit's main source and
+    aims at PARENT.S, then uses the existing per-source marker matching
+    to land on the right line:
+
+        (cursor on poly_ref.inc:30, included by foo.pas)
+        Alt+A  ->  opens foo.s, scrolls to the asm emitted for line 30
+                   of poly_ref.inc
+
+    If browser info hasn't been built yet you get a clear "compile with
+    browser info first" message instead of the generic "no .s file".
+
+
 == IDE 1.0.24k / Compiler 3.3.6k ==
 
   * Better i386 codegen for in-order Pentium / Pentium MMX targets
