@@ -5,6 +5,36 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24k / Compiler 3.3.6k ==
+
+  * Better i386 codegen for in-order Pentium / Pentium MMX targets
+    (`-OpPENTIUM` / `-OpPENTIUMMMX`). Two peephole rules now fire
+    that previously did not, producing slightly larger but
+    pairing-friendlier code:
+
+        notl  %eax            -->  xorl  $-1, %eax
+        movl  $-1, %eax       -->  orl   $-1, %eax
+
+    On the original Pentium and Pentium MMX, `not` and the 5-byte
+    `mov $-1, reg` form are U-pipe-only / longer to decode; the
+    `xor`/`or` rewrites pair in either pipe and the `or` form
+    encodes in 3 bytes via the imm8-sign-extended opcode. Both
+    rewrites stay silent under `-OpPENTIUM2` and later (where
+    out-of-order execution makes the false-dep on the destination
+    visible), and under `-Os` the existing size-only behaviour is
+    unchanged.
+
+    No change to PPU format -- units stamp 336 still applies, all
+    3.3.6* installs continue to share the same X:\fpc\units\336\
+    tree.
+
+  * Comment-only fix in the existing `movzbl reg/mem -> xorl reg,reg ; movb`
+    splitter: the rewrite is gated on `cpu_Pentium` only, not
+    `cpu_PentiumMMX`. On P55C the 0Fh prefix decodes free and `movzx`
+    pairs in either pipe, so the bare `movzbl` is the right output
+    there. The code already had this behaviour; the comment now matches.
+
+
 == IDE 1.0.24j / Compiler 3.3.6j ==
 
   * `{$schedule on}` / `{$schedule off}` now toggles the i386 PMMX
