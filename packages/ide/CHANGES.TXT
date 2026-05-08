@@ -5,95 +5,70 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24i / Compiler 3.3.6i ==
+
+  * Inline asm blocks are now scheduled by default when the i386 PMMX
+    scheduler is enabled. Previously every `asm ... end` block in a
+    Pascal proc had to opt in via `{$schedule on}` ahead of it; now
+    `-OoSCHEDULE` (or the IDE's "PMMX asm scheduler" checkbox) is
+    enough -- every reorder-safe block in scope is fair game for the
+    U/V pair reorderer.
+
+    The new behaviour is gated by a new optimizer switch
+    `-OoAUTOSCHEDASM` (default on). `-OoNOAUTOSCHEDASM` falls back to
+    the legacy semantics: only blocks marked with `{$schedule on}` are
+    touched. Pure-asm procs are unaffected -- they continue to opt in
+    via the `schedule` proc modifier (po_schedule_asm). No IDE checkbox
+    for the new switch; opt-out is command-line/fp.cfg only.
+
+    New regression test `tinlfpc_sched_auto_asm.pp` covers the auto-on
+    path; the legacy negative test `tinlfpc_sched_inline_asm.pp` was
+    updated to add `-OoNOAUTOSCHEDASM` so it keeps testing the
+    boundary case (block left untouched without the directive).
+
+
 == IDE 1.0.24h / Compiler 3.3.6h ==
 
-  * Fixed: cross-unit parser-state leak from `flag: T specialize [set]'
-    parameters that caused phantom "Identifier not found" cascades on
-    the first method body parsed in a unit compiled after the one
-    holding the specialize-set proc. The original symptom in the wild
-    was uvesadriver.pas failing to find inherited bitsPerPixel /
-    videoMemory etc. in tVesaDriver.setLogicalSize whenever a
-    yog_to_16_mmx-style specset proc was compiled earlier in the same
-    program build.
-
-    Two root causes, both addressed:
-
-    The body capture in pp_before_proc_body / pp_after_proc_body used
-    FPC's recordtoken/replaytoken token-stream machinery. When the
-    captured stream replayed inside a wrapper inject buffer, embedded
-    ST_LOADMESSAGES metadata records freed pendingstate.nextmessagerecord
-    while a stale copy of the same pointer sat in replaystack.pending;
-    the replay-end restore then double-freed it, corrupting compiler
-    state across the module boundary. The token-stream capture was
-    replaced with char-level body source-text capture (new
-    body_capture_active / body_capture_buf fields on tscannerfile,
-    hooked from readchar and readstring); the wrappers + dispatch stub
-    are pushed as one ansistring through substitutemacro, so the
-    parser re-tokenises from scratch under the surrounding module's
-    current settings -- no replay buffer, no metadata records,
-    nothing to leak.
-
-    Independently, pspecset's per-proc entries weren't removed from
-    the entries list once the wrappers were emitted. The list is
-    keyed by tprocdef pointer; freed procdef addresses got reused for
-    later modules' procdefs, and pspecset would mistake those for the
-    original specset proc and emit spurious wrappers against their
-    bodies. pspecset_remove now drops the entry at end of after-body.
+  * Fixed: a `specialize-set` parameter in one unit could break the
+    next unit compiled in the same program build. Symptom: the FIRST
+    method body parsed in the next unit suddenly failed with phantom
+    "Identifier not found" or "inherited member not visible" cascades
+    against members the class clearly had. Hit in the wild on
+    uVesaDriver.pas (setLogicalSize lost sight of inherited
+    bitsPerPixel / videoMemory) whenever a unit earlier in the build
+    used a specialize-set parameter. The fix is internal -- no source
+    changes needed.
 
 
 
-  * i386 PMMX scheduler -- Path A. The post-peephole U/V reorderer
-    grew teeth in three steps:
+  * i386 PMMX scheduler -- much smarter. The U/V reorderer added in
+    3.3.6c learned three new tricks:
 
-    A1: pairable-set extension. MMX integer ALU / compare / logical /
-        pack / unpack / movd / movq joined the pairable set; MMX
-        multiplier (PMUL*, PMADDWD) and shift (PSL*, PSR*) joined as
-        well, classified U-only. EMMS / FEMMS plus PUSH / POP /
-        PUSHA / POPA / ENTER / LEAVE became hard barriers (v1
-        missed those; both touch state our coarse memory model can't
-        reason about).
+      - MMX-aware. MMX arithmetic, compares, logicals, pack/unpack
+        and movd/movq now count as pairable; MMX multiplies and
+        shifts pair too, but only on the U pipe (so two PMULLWs in
+        a row no longer get falsely paired). EMMS, FEMMS, PUSH /
+        POP, ENTER / LEAVE became hard barriers and are never
+        reordered across.
 
-    A2: U/V/UV classification. New `OpcodeClass' returns pc_UV /
-        pc_UOnly / pc_VOnly / pc_None per opcode; `CanIssueParallel'
-        rejects two-of-the-same-restricted-pipe pairings. The MMX
-        multiplier and shifter are pinned to U on PMMX, so two
-        adjacent PMULLWs no longer get marked as pair-able even when
-        their registers are independent.
+      - Wider window. The old pass only looked at the immediate
+        [pairable, non-pairable, pairable] shape. The new pass
+        walks back up to 8 instructions from each pairable slot
+        looking for a partner, skipping intermediates as long as
+        every adjacent swap stays safe.
 
-    A3: backward sliding window. v1's main loop only looked at the
-        [P, NP, P] one-step shape. Path A's `TryHoistBackward' walks
-        up to 8 eligible positions backward from each pairable
-        instruction looking for an anchor it can hoist next to,
-        skipping over NP intermediates and register-dep chains as
-        long as each adjacent-swap step is safe (HasDep clear).
-        `AlreadyPairsWithNext' suppresses no-op churn: if anchor
-        already pairs with its immediate next neighbour, hoisting
-        target there would just shuffle which adjacency carries the
-        cycle, with zero benefit and real .s diff.
+      - No-op-pair detection. Skips swaps that would just shuffle
+        which adjacency carries an already-paired instruction --
+        zero benefit, real .s diff, not worth doing.
 
-    Per-swap visibility carries over from 3.3.6f: each commit drops a
-    `# sched-swap' marker comment, -vd adds a one-line hoist detail
-    (target opcode, hops back, anchor opcode), and per-proc / per-
-    unit / per-compile totals still surface as before.
+    Per-swap markers and -vd output from 3.3.6f carry through
+    unchanged: every applied swap drops a `# sched-swap' line into
+    the .s, and -vd shows per-swap / per-proc / per-unit /
+    per-compile counts.
 
-    Four new regression tests cover the new behaviour:
-      tinlfpc_sched_pmmx_pairtable -- A2 (U-only + UV pairs across
-                                      a bswap gap; two U-onlys do
-                                      not).
-      tinlfpc_sched_window8        -- A3 (independent paddw buried 5
-                                      hops behind another paddw
-                                      via NP bswap chain hoists
-                                      back).
-      tinlfpc_sched_mmx_arith      -- A1 (port of the original two-
-                                      MMX-chain shape; A1+A3 form
-                                      at least one new pair).
-      tinlfpc_sched_no_churn       -- A3 churn-guard (every pair
-                                      already adjacent; expect
-                                      zero markers).
-
-    test-lite gains %SCHED_SWAPS_MIN=N and %SCHED_SWAPS_MAX=N
-    directives for range assertions (the existing %SCHED_SWAPS=N
-    keeps its exact-match semantics).
+    test-lite gained `%SCHED_SWAPS_MIN=N' and `%SCHED_SWAPS_MAX=N'
+    directives for range assertions; `%SCHED_SWAPS=N' keeps its
+    exact-match semantics.
 
 
 == IDE 1.0.24f / Compiler 3.3.6f ==
@@ -180,40 +155,31 @@ Help | What's new...
 
 == IDE 1.0.24d / Compiler 3.3.6d ==
 
-  * `specialize-set' parameters can now declare a default value, e.g.
+  * `specialize-set' parameters can now declare a default value:
 
         procedure dith(k: integer specialize [1, 4, 8] = 4);
         procedure flag(b: boolean specialize [true, false] = true);
 
-    Callers omitting the optional argument bind to the dispatch stub
-    just as they would for any normal default-valued parameter.
-    Pre-fix the parser stored `defaultconstsym' on the (renamed-hidden)
-    original procdef but pspecset's dispatch-stub re-emitter rebuilt
-    the signature as bare `name : typename' and dropped the default,
-    so omitting the argument failed with "Wrong number of parameters
-    specified". The stub now carries the user's `= <literal>' on each
-    parameter, and the spec-set parameter's default is validated to
-    be a member of the set at after-body emit time (the case-table
-    dispatch has no else arm, so an out-of-set default would otherwise
-    silently fall through at runtime).
+    Callers can omit the argument; `dith()' is the same as
+    `dith(4)', and the constant-call collapse to a direct call
+    into the matching specialisation works for the omitted-arg
+    form too.
+
+    The default is required to be a member of the set -- writing
+    `k: integer specialize [1, 4, 8] = 2' is rejected at compile
+    time, because the compiler-generated case-table dispatch has
+    no else arm and a stray default would otherwise fall through
+    at runtime.
 
 == IDE 1.0.24c / Compiler 3.3.6c ==
 
-  * Pascal-style block comments inside a `specialize-set' asm body
-    no longer break the next unrelated proc. The pspecset SS-B
-    capture path records the asm body source so each per-value
-    wrapper can replay it through substitutemacro; comment-skipping
-    used scanner.readchar (which bypasses asmgetchar's capture hook),
-    so the comment text was missing from the replay buffer. The
-    wrapper asm reader then saw an unbalanced opening brace, ran
-    skipcomment past EOF of the synthetic, and lapped into the
-    surrounding source -- breaking the next proc with a cascade of
-    "Unrecognized opcode ASM" / "Unknown identifier" errors. Hit in
-    the wild when yog_to_16_mmx in dev/video picked up the new
-    specset+%if pattern: yog_to_32_mmx (the next proc in the file)
-    suddenly stopped parsing. All three comment forms (curly-brace,
-    paren-star, double-slash) now capture cleanly inside the asm
-    side-channel.
+  * Pascal-style block comments (`{...}', `(*...*)', `//...') inside
+    a `specialize-set' asm body no longer break the next unrelated
+    proc. Pre-fix, an asm body that contained a `{...}' or `//'
+    comment confused the per-value wrapper synthesis enough that the
+    next proc in the same unit failed to parse with cascading
+    "Unrecognized opcode ASM" errors. All three comment forms now
+    work inside specset-asm bodies.
 
   * `schedule' proc modifier and `{$schedule on}' directive let
     user-written asm opt in to the i386 PMMX U/V scheduler:
@@ -255,19 +221,16 @@ Help | What's new...
 
 == IDE 1.0.24b / Compiler 3.3.6b ==
 
-  * DFA / const-prop now runs on Pascal procs that inline pure-asm
-    helpers. Previously, splicing an inline-asm body into a Pascal
-    caller set pi_has_assembler_block on the caller (via
-    tasmnode.pass_typecheck), and the DFA optimiser pass at -O2+
-    bailed on any proc with that flag set. So a single
-    `cStart(slot)` call inside a 200-line Pascal procedure cost the
-    whole procedure its const-prop, dead-store-elimination, and
-    branch folding -- a long way past the splice site. The asmnode
-    cloned at splice time now carries a new asmnf_inline_splice
-    flag; pass_typecheck recognises it and leaves pi_has_assembler_
-    block clear. User-written `asm ... end;` blocks in your own
-    Pascal code still set the flag and still disable DFA -- only
-    the spliced clones of validated pure-asm helpers don't.
+  * Const-prop / DFA now runs on Pascal procs that inline pure-asm
+    helpers. Pre-fix, a single inline-asm helper call (e.g.
+    `cStart(slot)') inside a 200-line Pascal procedure disabled
+    constant propagation, dead-store elimination, and branch folding
+    for the whole rest of the procedure -- well past the splice
+    site. The optimiser now recognises the spliced asm body as
+    "validated pure-asm helper" and keeps DFA enabled. User-written
+    `asm ... end;` blocks in your own code still disable DFA on the
+    enclosing proc as before; only spliced clones of inline-asm
+    helpers get the new treatment.
 
 
 == IDE 1.0.24a / Compiler 3.3.6a ==
@@ -279,6 +242,14 @@ Help | What's new...
     through a stack temp. Net effect at every such call site: one
     `mov reg, $imm` instead of `mov [slot], $imm ; mov reg, [slot]`.
     Common case for `myinline(0, x)`, flag/mask args, etc.
+
+  * Clearer error when a `.ppu` file is from a different compiler
+    version. The previous wording was just "Can't compile unit FOO,
+    no sources available", with the actual cause ("PPU Invalid
+    Version") buried at the unusual `-vu' verbosity level. The
+    fatal line now spells out the version mismatch directly --
+    the usual fix is to delete the old `.ppu' or rebuild against
+    the matching compiler.
 
 
 == IDE 1.0.24 / Compiler 3.3.6 ==

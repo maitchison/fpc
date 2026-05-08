@@ -404,7 +404,17 @@ interface
            still-experimental cross-unit asm-inline path: if a body
            tickles a splice/codegen bug, flip this off to fall back to
            pre-asm-inline behaviour without rebuilding the compiler. }
-         cs_opt_asm_inline
+         cs_opt_asm_inline,
+         (* Auto-schedule inline asm blocks when the i386 PMMX scheduler is
+            on. Default ON. When -OoSCHEDULE is in effect AND this switch
+            is set, every "asm ... end;" block within a Pascal proc is
+            scheduled as if the user had written {$schedule on} in front
+            of it. -OoNOAUTOSCHEDASM disables the auto behaviour, in which
+            case the scheduler only touches blocks that opt in explicitly
+            via the directive (legacy semantics). Pure-asm procs are
+            unaffected; they continue to opt in via the "schedule" proc
+            modifier (po_schedule_asm). *)
+         cs_opt_schedule_asm_auto
        );
        toptimizerswitches = set of toptimizerswitch;
 
@@ -485,7 +495,8 @@ interface
          'DEADSTORE','FORCENOSTACKFRAME','USELOADMODIFYSTORE',
          'UNUSEDPARA','CONSTS','FORLOOP',
          'SCCINLINEFIRST',
-         'ASMINLINE'
+         'ASMINLINE',
+         'AUTOSCHEDASM'
        );
 
        { Numeric -OoKEY=N knobs (parsed by dirparse.UpdateOptimizerStr).

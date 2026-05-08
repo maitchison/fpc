@@ -1,11 +1,16 @@
-{ %OPT=-OoSCHEDULE -OpPENTIUMMMX -O2 -Si }
+{ %OPT=-OoSCHEDULE -OoNOAUTOSCHEDASM -OpPENTIUMMMX -O2 -Si }
 { %RESULT=0 }
 {
-  Inline-asm boundary: scheduler must NOT reorder instructions inside
-  a user `asm ... end;` block embedded in a normal Pascal procedure.
-  The TAsmScheduler.Optimize loop in compiler/aopt.pas skips
-  mark_AsmBlockStart..mark_AsmBlockEnd ranges; this test exercises
-  that skip with a sequence whose ordering is semantically required.
+  Inline-asm boundary (legacy semantics, -OoNOAUTOSCHEDASM opt-out):
+  scheduler must NOT reorder instructions inside a user `asm ... end;`
+  block embedded in a normal Pascal procedure when the auto rule is
+  off and the block doesn't carry `{$schedule on}`. The
+  TAsmScheduler.Optimize loop in compiler/aopt.pas skips
+  mark_AsmBlockStart..mark_AsmBlockEnd ranges with the scheduler flag
+  cleared; this test exercises that skip with a sequence whose ordering
+  is semantically required.
+
+  The auto-on rule (default) is exercised by tinlfpc_sched_auto_asm.
 
   The asm block computes (a+b)*2 - b = 2a + b via:
     mov eax, a

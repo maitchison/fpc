@@ -557,8 +557,14 @@ Const
           asm-inline only fires for procs explicitly marked
           `assembler; nostackframe; inline;`, so cost when nothing
           opts in is zero. -OoNOASMINLINE is the escape hatch when a
-          body trips the still-experimental splice/codegen path. }
-        optimizerswitches : [cs_opt_scc_inline_first,cs_opt_asm_inline];
+          body trips the still-experimental splice/codegen path.
+          cs_opt_schedule_asm_auto defaults ON: when -OoSCHEDULE is also
+          active, every inline asm block is treated as if a $schedule on
+          directive had been written before it. -OoNOAUTOSCHEDASM falls
+          back to legacy semantics (only blocks with the explicit
+          directive schedule). When -OoSCHEDULE is OFF the auto switch
+          has no effect (the scheduler doesn't run regardless). }
+        optimizerswitches : [cs_opt_scc_inline_first,cs_opt_asm_inline,cs_opt_schedule_asm_auto];
         genwpoptimizerswitches : [];
         dowpoptimizerswitches : [];
 {$ifdef i8086}
