@@ -1745,6 +1745,7 @@ implementation
         { because the END is already read we need to get the
           last_endtoken_filepos here (PFV) }
         last_endtoken_filepos:=current_tokenpos;
+        current_scanner.mark_specset_body_end;
 
         assembler_block:=p;
       end;

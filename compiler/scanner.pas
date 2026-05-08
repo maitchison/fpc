@@ -188,6 +188,23 @@ interface
           asm_capture_active : boolean;
           asm_capture_buf    : ansistring;
 
+          // specialize-set body source-text capture. While
+          // body_capture_active is true, every char advanced through
+          // readchar is appended to body_capture_buf. pspecset's
+          // pp_before_proc_body handler turns this on and pp_after_proc_body
+          // turns it off; the captured text is then pushed through
+          // substitutemacro so each per-value wrapper re-tokenises the
+          // body in its own scope. Char-level capture sidesteps the
+          // recordtoken/replaytoken metadata-replay path which leaks
+          // pendingstate.nextmessagerecord across module boundaries.
+          // body_capture_endmark snapshots length(body_capture_buf) each
+          // time _END is consumed; the last snapshot identifies the
+          // body's outermost `end' so the trailing keyword-lookahead
+          // char and any chars past it can be trimmed at end-capture.
+          body_capture_active  : boolean;
+          body_capture_buf     : ansistring;
+          body_capture_endmark : longint;
+
           { last settings we stored }
           last_settings : tsettings;
           last_message : pmessagestaterecord;
@@ -272,6 +289,16 @@ interface
           // terminator) into subsequent parsing. Returns true if a pop
           // was performed.
           function pop_specset_asm_source_if_active : boolean;
+          // specialize-set body-source capture lifecycle. begin_ seeds
+          // the capture with the current `c' (the lookahead char already
+          // loaded after the body's first token); subsequent chars are
+          // captured through readchar's hook. end_ returns the captured
+          // text truncated to the snapshot taken at the body's outer
+          // _END consume site (see mark_specset_body_end), which trims
+          // the keyword-lookahead char that readchar pulls past `end'.
+          procedure begin_specset_body_capture;
+          function end_specset_body_capture : ansistring;
+          procedure mark_specset_body_end;
           { bit length asizeint is target depend }
           procedure tokenwritesizeint(val : asizeint);
           procedure tokenwritelongint(val : longint);
@@ -3119,6 +3146,9 @@ type
         change_endian_for_replay:=false;
         asm_capture_active:=false;
         asm_capture_buf:='';
+        body_capture_active:=false;
+        body_capture_buf:='';
+        body_capture_endmark:=0;
         initwidestring(patternw);
       end;
 
@@ -3431,6 +3461,72 @@ type
         if len > 0 then
           recordtokenbuf.write(asm_capture_buf[1], len);
         asm_capture_buf := '';
+      end;
+
+
+    // Initialise the body-capture buffer with the source text of the
+    // lookahead token already loaded by the parser plus the current `c'
+    // (which holds the char immediately after that token). Subsequent
+    // chars are appended in readchar.
+    procedure tscannerfile.begin_specset_body_capture;
+      var
+        s : shortstring;
+      begin
+        if body_capture_active then
+          exit;
+        s := arraytokeninfo[token].str;
+        if s = '' then
+          begin
+            if (token = _ID) or (idtoken <> _NOID) then
+              s := orgpattern
+            else if (token = _INTCONST) or (token = _REALNUMBER) or
+                    (token = _CCHAR) then
+              s := pattern
+            else
+              s := '';
+          end;
+        body_capture_buf := s;
+        if (c <> #26) then
+          body_capture_buf := body_capture_buf + c;
+        body_capture_endmark := 0;
+        body_capture_active := true;
+      end;
+
+
+    function tscannerfile.end_specset_body_capture : ansistring;
+      var
+        cutoff : longint;
+      begin
+        body_capture_active := false;
+        if body_capture_endmark > 0 then
+          // The endmark snapshots length(body_capture_buf) at consume(_END)
+          // entry, when the buf already includes the lookahead char read
+          // past `end' by readtoken. Trim that one char so the synthetic
+          // we push to the parser ends exactly at `d' of the body's outer
+          // `end'. (ASCII assumption -- the lookahead char after a Pascal
+          // keyword is always a single-byte separator: whitespace, ; or :.)
+          cutoff := body_capture_endmark - 1
+        else
+          cutoff := length(body_capture_buf);
+        if cutoff < 0 then
+          cutoff := 0;
+        if cutoff > length(body_capture_buf) then
+          cutoff := length(body_capture_buf);
+        result := copy(body_capture_buf, 1, cutoff);
+        body_capture_buf := '';
+        body_capture_endmark := 0;
+      end;
+
+
+    // Snapshot length(body_capture_buf) at the entry to consume(_END) /
+    // try_to_consume(_END). Called from pbase.consume / try_to_consume,
+    // matching the existing last_endtoken_filepos write site. The latest
+    // snapshot wins, so by the time pp_after_proc_body fires it points
+    // at the body's outermost `end'.
+    procedure tscannerfile.mark_specset_body_end;
+      begin
+        if body_capture_active then
+          body_capture_endmark := length(body_capture_buf);
       end;
 
 
@@ -4771,6 +4867,10 @@ type
 {$else not CHECK_INPUTPOINTER_LIMITS}
           inc(inputpointer);
 {$endif CHECK_INPUTPOINTER_LIMITS}
+        // specialize-set body source-text capture: see body_capture_active
+        // field comment.
+        if body_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+          body_capture_buf := body_capture_buf + c;
       end;
 
 
@@ -4814,6 +4914,9 @@ type
                 c:=inputpointer^;
                 inc(inputpointer);
 {$endif CHECK_INPUTPOINTER_LIMITS}
+                // specialize-set body capture (readstring bypasses readchar)
+                if body_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+                  body_capture_buf := body_capture_buf + c;
               end;
             #0 :
               reload;
@@ -4841,6 +4944,9 @@ type
                 c:=inputpointer^;
                 inc(inputpointer);
 {$endif CHECK_INPUTPOINTER_LIMITS}
+                // specialize-set body capture
+                if body_capture_active and not assigned(replaytokenbuf) and (c<>#26) then
+                  body_capture_buf := body_capture_buf + c;
               end
             else
               break;

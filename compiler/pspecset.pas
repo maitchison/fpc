@@ -23,7 +23,7 @@
     Hooks (registered in initialization):
 
       pp_at_param_modifier  -- parse + validate + sidecar
-      pp_before_proc_body   -- ppreproc_capture_begin (body capture)
+      pp_before_proc_body   -- begin_specset_body_capture (body source-text capture)
       pp_after_proc_body    -- emit wrappers + stub, inject
 
     Sidecar lifetime: process-global. Keyed by procdef pointer.
@@ -59,9 +59,14 @@ interface
           stub takes this name back. }
         orig_name: shortstring;
         params: array of tpspecset_param_entry;
-        { Body-capture buffer, set in pp_before_proc_body, finalised
-          in pp_after_proc_body. nil if no capture is active. }
-        body_buf: tppreproc_buf;
+        { Body source-text, populated by pp_after_proc_body from the
+          scanner's body_capture_buf. Empty unless a capture is in
+          flight or has been finalised. body_capture_active is set
+          while the capture is live (pp_before_proc_body to
+          pp_after_proc_body) so the after-body handler can tell
+          "no capture started" from "capture finished, text empty". }
+        body_text: ansistring;
+        body_capture_active: boolean;
         constructor create(apd: tprocdef);
         destructor destroy; override;
       end;
@@ -121,16 +126,13 @@ implementation
       begin
         inherited create;
         procdef := apd;
-        body_buf := nil;
+        body_text := '';
+        body_capture_active := false;
       end;
 
     destructor tpspecset_proc_entry.destroy;
       begin
-        if assigned(body_buf) then
-          begin
-            body_buf.free;
-            body_buf := nil;
-          end;
+        body_text := '';
         inherited destroy;
       end;
 
@@ -159,6 +161,24 @@ implementation
               entries := TFPObjectList.create(true);
             entries.add(result);
           end;
+      end;
+
+    { Remove and free the entry. Called at end of pspecset_handle_after_body
+      so the entry doesn't outlive its procdef -- once the wrappers + stub
+      have been emitted there's nothing more to do for that proc, and the
+      backing procdef may be freed (or its memory reused) by the time the
+      next module compiles. Without this, a later procdef whose pointer
+      happens to match the freed one's address would be misidentified as
+      a specset proc and trigger spurious wrapper emission. }
+    procedure pspecset_remove(entry: tpspecset_proc_entry);
+      var
+        idx: longint;
+      begin
+        if (entry = nil) or (not assigned(entries)) then
+          exit;
+        idx := entries.IndexOf(entry);
+        if idx >= 0 then
+          entries.Delete(idx);
       end;
 
     function pspecset_total_count(entry: tpspecset_proc_entry): longint;
@@ -573,7 +593,6 @@ implementation
         body_ctx: pppreproc_proc_body_ctx;
         pd: tprocdef;
         entry: tpspecset_proc_entry;
-        origin: tppreproc_origin;
       begin
         result := false;
         if not assigned(ctx) then
@@ -587,7 +606,7 @@ implementation
           exit;
         if length(entry.params) = 0 then
           exit;
-        if assigned(entry.body_buf) then
+        if entry.body_capture_active then
           { defensive: capture already in progress for this procdef }
           exit;
         if current_scanner.is_recording_tokens then
@@ -598,9 +617,15 @@ implementation
             exit;
           end;
 
-        origin.triggered_at := current_filepos;
-        origin.feature := 'specialize-set-body';
-        entry.body_buf := ppreproc_capture_begin(origin);
+        { Char-level body capture. Sidesteps the recordtoken/replaytoken
+          metadata-replay path that leaks pendingstate.nextmessagerecord
+          across module boundaries (the SS-B token-stream approach used
+          to do `startrecordtokens(buf)' here). The captured text is
+          re-tokenised at wrapper-emit time via substitutemacro, so each
+          per-value wrapper gets a fresh parse under the surrounding
+          module's current settings. }
+        current_scanner.begin_specset_body_capture;
+        entry.body_capture_active := true;
         Comment(V_Debug, 'specialize-set: body capture begun');
         result := true;
       end;
@@ -627,23 +652,49 @@ implementation
         default_constsym: tsym;
       end;
 
-    { Append the captured body buffer into `dst' verbatim. The source
-      buffer's read pointer is preserved. }
-    procedure copy_buf_into(dst, src: tppreproc_buf);
-      var
-        savepos: longword;
-        b: byte;
+    { Format a single value as a Pascal source literal of the right
+      textual form for the param def: `false'/`true' for booleans, the
+      decimal representation for everything else. The wrapper text is
+      pushed through substitutemacro and re-tokenised in the wrapper's
+      scope, so untyped 0 would not match a boolean param's `case' arm. }
+    function value_literal_text(v: int64; param_def: tdef): ansistring;
       begin
-        if not assigned(src) then
-          exit;
-        savepos := src.data.pos;
-        src.data.seek(0);
-        while src.data.pos < src.data.size do
+        if assigned(param_def) and is_boolean(param_def) then
           begin
-            src.data.read(b, 1);
-            dst.data.write(b, 1);
-          end;
-        src.data.seek(savepos);
+            if v = 0 then
+              result := 'false'
+            else
+              result := 'true';
+          end
+        else
+          result := tostr(v);
+      end;
+
+    function param_spec_text(spec: tvarspez): ansistring;
+      begin
+        case spec of
+          vs_var:      result := 'var ';
+          vs_const:    result := 'const ';
+          vs_out:      result := 'out ';
+          vs_constref: result := 'constref ';
+          else
+            result := '';
+        end;
+      end;
+
+    function default_for_param_text(ds: tsym; param_def: tdef): ansistring;
+      var
+        cs: tconstsym;
+      begin
+        result := '';
+        if not assigned(ds) then
+          exit;
+        if ds.typ <> constsym then
+          exit;
+        cs := tconstsym(ds);
+        if cs.consttyp <> constord then
+          exit;
+        result := ' = ' + value_literal_text(int64(cs.value.valueord), param_def);
       end;
 
     { Walk pd.parast.SymList and collect ALL visible (non-hidden)
@@ -696,71 +747,39 @@ implementation
           end;
       end;
 
-    procedure emit_param_spec(buf: tppreproc_buf; spec: tvarspez);
-      begin
-        case spec of
-          vs_var:      ppreproc_emit_keyword(buf, _VAR);
-          vs_const:    ppreproc_emit_keyword(buf, _CONST);
-          vs_out:      ppreproc_emit_keyword(buf, _OUT);
-          vs_constref: ppreproc_emit_ident(buf, 'constref');
-          else
-            ;
-        end;
-      end;
-
-    { Emit a literal of the right textual form for the param def: int
-      literal for ordinals in general, but `false'/`true' identifiers
-      for booleans (so the resulting `case <bool> of 0:..' compiles). }
-    procedure emit_value_literal(buf: tppreproc_buf; v: int64; param_def: tdef);
-      begin
-        if assigned(param_def) and is_boolean(param_def) then
-          begin
-            if v = 0 then
-              ppreproc_emit_ident(buf, 'false')
-            else
-              ppreproc_emit_ident(buf, 'true');
-          end
-        else
-          ppreproc_emit_intliteral(buf, v);
-      end;
-
-    { Emit:
+    { Build:
         procedure <wrapper_name>(<sig minus k>); inline;
         const <kname> = <v>;
-        <body tokens>
-      The body is a cloned copy of body_buf. }
-    procedure emit_wrapper(buf: tppreproc_buf;
-                           const wrapper_name: shortstring;
-                           v: int64;
-                           const kname: shortstring;
-                           const emit_paras: array of tspecset_emit_param;
-                           paras_count: longint;
-                           body_buf: tppreproc_buf;
-                           param_def: tdef;
-                           emit_inline: boolean);
+        <body_text>
+        ;
+      as a Pascal source string. body_text is the captured body source
+      verbatim (including the leading `begin'/`var'/etc. and the closing
+      `end'); the trailing `;' after `end' is appended here. }
+    function build_wrapper_text(const wrapper_name: shortstring;
+                                v: int64;
+                                const kname: shortstring;
+                                const emit_paras: array of tspecset_emit_param;
+                                paras_count: longint;
+                                const body_text: ansistring;
+                                param_def: tdef;
+                                emit_inline: boolean): ansistring;
       var
         i: longint;
         first_para: boolean;
       begin
-        ppreproc_emit_keyword(buf, _PROCEDURE);
-        ppreproc_emit_ident(buf, wrapper_name);
-
-        ppreproc_emit_punct(buf, _LKLAMMER);
+        result := 'procedure ' + wrapper_name + '(';
         first_para := true;
         for i := 0 to paras_count - 1 do
           begin
             if emit_paras[i].is_specparam then
               continue;
             if not first_para then
-              ppreproc_emit_punct(buf, _SEMICOLON);
-            emit_param_spec(buf, emit_paras[i].spec);
-            ppreproc_emit_ident(buf, emit_paras[i].name);
-            ppreproc_emit_punct(buf, _COLON);
-            ppreproc_emit_ident(buf, emit_paras[i].typename);
+              result := result + '; ';
+            result := result + param_spec_text(emit_paras[i].spec) +
+                      emit_paras[i].name + ': ' + emit_paras[i].typename;
             first_para := false;
           end;
-        ppreproc_emit_punct(buf, _RKLAMMER);
-        ppreproc_emit_punct(buf, _SEMICOLON);
+        result := result + '); ';
 
         { Inherit `inline;' from the source proc only. The dispatch stub is
           always inline (that's what folds constant call sites); the wrapper
@@ -771,49 +790,20 @@ implementation
           asm bodies and worse, leaves the asm reader / parser in a bad
           state for subsequent declarations. }
         if emit_inline then
-          begin
-            ppreproc_emit_ident_as(buf, 'inline', _INLINE);
-            ppreproc_emit_punct(buf, _SEMICOLON);
-          end;
+          result := result + 'inline; ';
 
         { const k = <v>; -- value form depends on the param's type so
           that boolean specialisations emit `const k = false;' instead
           of `const k = 0;' (untyped 0 would not match boolean uses). }
-        ppreproc_emit_keyword(buf, _CONST);
-        ppreproc_emit_ident(buf, kname);
-        ppreproc_emit_punct(buf, _EQ);
-        emit_value_literal(buf, v, param_def);
-        ppreproc_emit_punct(buf, _SEMICOLON);
+        result := result + 'const ' + kname + ' = ' +
+                  value_literal_text(v, param_def) + ';' + #10;
 
-        { Body tokens: local decls + begin..end. }
-        copy_buf_into(buf, body_buf);
-
-        { Trailing `;' after the body's `end'. }
-        ppreproc_emit_punct(buf, _SEMICOLON);
+        { Body source: local decls + begin..end. Followed by the `;'
+          read_proc_body's caller expects after each proc decl. }
+        result := result + body_text + ';' + #10;
       end;
 
-    { Emit `= <literal>' if the parameter has a default constsym we
-      can express. Currently only constord defaults are supported --
-      that covers boolean / integer / enum, which is all spec-set
-      meaningfully accepts. Other consttyps are silently dropped (the
-      caller is then no worse off than before this feature landed). }
-    procedure emit_default_for_param(buf: tppreproc_buf;
-                                     ds: tsym; param_def: tdef);
-      var
-        cs: tconstsym;
-      begin
-        if not assigned(ds) then
-          exit;
-        if ds.typ <> constsym then
-          exit;
-        cs := tconstsym(ds);
-        if cs.consttyp <> constord then
-          exit;
-        ppreproc_emit_punct(buf, _EQ);
-        emit_value_literal(buf, int64(cs.value.valueord), param_def);
-      end;
-
-    { Emit:
+    { Build:
         procedure <fname>(<full sig including k in source order>); inline;
         begin
           case <kname> of
@@ -822,73 +812,52 @@ implementation
           end;
         end;
     }
-    procedure emit_dispatch_stub(buf: tppreproc_buf;
-                                 const fname: shortstring;
-                                 const kname: shortstring;
-                                 const emit_paras: array of tspecset_emit_param;
-                                 paras_count: longint;
-                                 const values: array of int64;
-                                 param_def: tdef);
+    function build_dispatch_stub_text(const fname: shortstring;
+                                      const kname: shortstring;
+                                      const emit_paras: array of tspecset_emit_param;
+                                      paras_count: longint;
+                                      const values: array of int64;
+                                      param_def: tdef): ansistring;
       var
         i, j: longint;
         first_arg: boolean;
       begin
-        ppreproc_emit_keyword(buf, _PROCEDURE);
-        ppreproc_emit_ident(buf, fname);
+        result := 'procedure ' + fname + '(';
 
         { Full signature -- preserves user's source order, K and all,
           including any `= <default>' the user wrote. Without the
           default re-emitted, callers omitting the optional arg would
           fail with parser_e_wrong_parameter_size against the stub. }
-        ppreproc_emit_punct(buf, _LKLAMMER);
         for i := 0 to paras_count - 1 do
           begin
             if i > 0 then
-              ppreproc_emit_punct(buf, _SEMICOLON);
-            emit_param_spec(buf, emit_paras[i].spec);
-            ppreproc_emit_ident(buf, emit_paras[i].name);
-            ppreproc_emit_punct(buf, _COLON);
-            ppreproc_emit_ident(buf, emit_paras[i].typename);
-            emit_default_for_param(buf, emit_paras[i].default_constsym,
-                                   emit_paras[i].param_def);
+              result := result + '; ';
+            result := result + param_spec_text(emit_paras[i].spec) +
+                      emit_paras[i].name + ': ' + emit_paras[i].typename +
+                      default_for_param_text(emit_paras[i].default_constsym,
+                                             emit_paras[i].param_def);
           end;
-        ppreproc_emit_punct(buf, _RKLAMMER);
-        ppreproc_emit_punct(buf, _SEMICOLON);
-
-        { inline directive }
-        ppreproc_emit_ident_as(buf, 'inline', _INLINE);
-        ppreproc_emit_punct(buf, _SEMICOLON);
-
-        { begin case <kname> of ... end; end; }
-        ppreproc_emit_keyword(buf, _BEGIN);
-        ppreproc_emit_keyword(buf, _CASE);
-        ppreproc_emit_ident(buf, kname);
-        ppreproc_emit_keyword(buf, _OF);
+        result := result + '); inline;' + #10 +
+                  'begin case ' + kname + ' of' + #10;
 
         for i := 0 to high(values) do
           begin
-            emit_value_literal(buf, values[i], param_def);
-            ppreproc_emit_punct(buf, _COLON);
-            ppreproc_emit_ident(buf, fname + '__K_' + tostr(values[i]));
-            ppreproc_emit_punct(buf, _LKLAMMER);
+            result := result + '  ' + value_literal_text(values[i], param_def) +
+                      ': ' + fname + '__K_' + tostr(values[i]) + '(';
             first_arg := true;
             for j := 0 to paras_count - 1 do
               begin
                 if emit_paras[j].is_specparam then
                   continue;
                 if not first_arg then
-                  ppreproc_emit_punct(buf, _COMMA);
-                ppreproc_emit_ident(buf, emit_paras[j].name);
+                  result := result + ', ';
+                result := result + emit_paras[j].name;
                 first_arg := false;
               end;
-            ppreproc_emit_punct(buf, _RKLAMMER);
-            ppreproc_emit_punct(buf, _SEMICOLON);
+            result := result + ');' + #10;
           end;
 
-        ppreproc_emit_keyword(buf, _END);  { case-end }
-        ppreproc_emit_punct(buf, _SEMICOLON);
-        ppreproc_emit_keyword(buf, _END);  { proc-end }
-        ppreproc_emit_punct(buf, _SEMICOLON);
+        result := result + 'end;' + #10 + 'end;' + #10;
       end;
 
     { ============================================================
@@ -903,8 +872,8 @@ implementation
         param_entry: tpspecset_param_entry;
         emit_paras: array[0..63] of tspecset_emit_param;
         paras_count: longint;
-        inject_buf: tppreproc_buf;
-        inject_origin: tppreproc_origin;
+        synth_text: ansistring;
+        synth_origin: tfileposinfo;
         i, j: longint;
         wrapper_name: shortstring;
         kname: shortstring;
@@ -926,13 +895,16 @@ implementation
         entry := pspecset_find(pd);
         if entry = nil then
           exit;
-        if not assigned(entry.body_buf) then
+        if not entry.body_capture_active then
           exit;
 
-        { Finalise body capture. }
-        ppreproc_capture_end(entry.body_buf);
+        { Finalise body capture. The text is trimmed at the body's outer
+          `end' via the body_capture_endmark snapshot taken in pbase
+          consume(_END). }
+        entry.body_text := current_scanner.end_specset_body_capture;
+        entry.body_capture_active := false;
         Comment(V_Debug, 'specialize-set: body capture ended, ' +
-          tostr(entry.body_buf.data.size) + ' bytes');
+          tostr(length(entry.body_text)) + ' bytes');
 
         { v1: only one specialize-set parameter supported. }
         if length(entry.params) <> 1 then
@@ -990,62 +962,66 @@ implementation
               end;
           end;
 
-        { Build the injection buffer. The leading `;' satisfies
-          read_proc_body's consume(_SEMICOLON) that fires right after
-          we return -- see the matching `if current_scanner.token =
-          _SEMICOLON then consume' below for the rest of the dance. }
-        inject_origin.triggered_at := current_filepos;
-        inject_origin.feature := 'specialize-set-emit';
-        inject_buf := tppreproc_buf.create(inject_origin);
-        ppreproc_emit_punct(inject_buf, _SEMICOLON);
-
+        { Build the synthetic source: N wrappers + 1 dispatch stub. The
+          user's `;' that follows the body's `end' has already been
+          tokenised into current_scanner.token by the time we run, so we
+          DON'T consume it: we let it stay there for read_proc_body's
+          consume(_SEMICOLON) (psub.pas:2965), which fires right after we
+          return. substitutemacro changes the input file but leaves
+          current_scanner.token alone, so the pending _SEMICOLON survives
+          the input switch. After consume(_SEMICOLON), the parser advances
+          into the synthetic and reads our first wrapper's `procedure ...'
+          token. When the synthetic drains, scanner control returns to
+          user source one token past the original `;' -- ready for the
+          next user-level decl (e.g. `procedure g'). }
+        synth_text := '';
         for i := 0 to high(param_entry.values) do
           begin
             wrapper_name := orig_name + '__K_' +
                             tostr(param_entry.values[i]);
-            emit_wrapper(inject_buf, wrapper_name,
-                         param_entry.values[i], kname,
-                         emit_paras, paras_count, entry.body_buf,
-                         param_entry.param_def,
-                         { Only emit `inline;' on the wrapper if the user's
-                           source proc was declared inline. Asm-bodied procs
-                           and other inline-incompatible constructs aren't
-                           tagged inline by the user, so the wrapper stays
-                           a regular call. }
-                         po_inline in pd.procoptions);
+            synth_text := synth_text +
+              build_wrapper_text(wrapper_name,
+                                 param_entry.values[i], kname,
+                                 emit_paras, paras_count, entry.body_text,
+                                 param_entry.param_def,
+                                 { Only emit `inline;' on the wrapper if the user's
+                                   source proc was declared inline. Asm-bodied procs
+                                   and other inline-incompatible constructs aren't
+                                   tagged inline by the user, so the wrapper stays
+                                   a regular call. }
+                                 po_inline in pd.procoptions);
           end;
 
         { The user's procsym was already renamed in SS-A; orig_name
           is now free for the dispatch stub to claim when its decl
-          parses out of the inject buffer. }
-        emit_dispatch_stub(inject_buf, orig_name, kname,
-                           emit_paras, paras_count, param_entry.values,
-                           param_entry.param_def);
-
-        { read_proc_body (psub.pas:2912) will call consume(_SEMICOLON)
-          shortly after we return -- it expects the `;' that follows
-          the body's `end' in user source. Eat the user's `;' now,
-          and prepend our own `;' to the inject buffer so the upcoming
-          consume sees one. After the buffer drains, scanner control
-          returns to user source one token past the original `;' --
-          ready for the next user-level decl (e.g. `procedure g'). }
-        if current_scanner.token = _SEMICOLON then
-          consume(_SEMICOLON);
+          parses out of the synthetic source. }
+        synth_text := synth_text +
+          build_dispatch_stub_text(orig_name, kname,
+                                   emit_paras, paras_count, param_entry.values,
+                                   param_entry.param_def);
 
         Comment(V_Debug,
-          'specialize-set: inject buffer ' + tostr(inject_buf.data.size) +
+          'specialize-set: synthetic source ' + tostr(length(synth_text)) +
           ' bytes (' + tostr(length(param_entry.values)) +
           ' wrappers + 1 stub)');
 
-        ppreproc_inject(inject_buf);
+        { Push the wrapper+stub source as a synthetic input file. The
+          parser re-tokenises from scratch under the surrounding module's
+          current settings -- no replaytoken, no metadata-replay path,
+          no pendingstate.nextmessagerecord leak. }
+        synth_origin := current_filepos;
+        current_scanner.substitutemacro('specset_body',
+          @synth_text[1], length(synth_text),
+          synth_origin.line, synth_origin.fileindex, true);
 
-        { body_buf is no longer needed; release. The injection buffer
-          stays alive until the scanner replay is done -- the scanner
-          owns the underlying tdynamicarray during replay; we leak the
-          tppreproc_buf wrapper. v1: trivial leak per specset proc;
-          revisit if it ever matters. }
-        entry.body_buf.free;
-        entry.body_buf := nil;
+        { body_text is no longer needed; release. }
+        entry.body_text := '';
+
+        { Remove the entry. The procdef this entry pinned may be freed
+          when its module unloads, and a future procdef can be allocated
+          at the same address; without removing the entry we'd incorrectly
+          treat that future procdef as a specset proc. }
+        pspecset_remove(entry);
 
         result := true;
       end;
