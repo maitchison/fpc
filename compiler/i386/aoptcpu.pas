@@ -405,8 +405,10 @@ unit aoptcpu;
                                      not(cs_opt_size in current_settings.optimizerswitches) and
                                      (current_settings.optimizecputype = cpu_Pentium) then
                                       {Change "movzbl %reg1, %reg2" to
-                                       "xorl %reg2, %reg2; movb %reg1, %reg2" for Pentium and
-                                       PentiumMMX}
+                                       "xorl %reg2, %reg2; movb %reg1, %reg2" for plain
+                                       Pentium (P54C). On PentiumMMX (P55C) the 0Fh prefix
+                                       decodes free and movzx pairs in either pipe, so the
+                                       split is not a win there.}
                                     begin
                                       hp1 := taicpu.op_reg_reg(A_XOR, S_L,
                                                   taicpu(p).oper[1]^.reg, taicpu(p).oper[1]^.reg);
@@ -427,8 +429,8 @@ unit aoptcpu;
                               IsGP32Reg(taicpu(p).oper[1]^.reg) and
                               (current_settings.optimizecputype = cpu_Pentium) and
                               (taicpu(p).opsize = S_BL) then
-                            {changes "movzbl mem, %reg" to "xorl %reg, %reg; movb mem, %reg8" for
-                              Pentium and PentiumMMX}
+                            {changes "movzbl mem, %reg" to "xorl %reg, %reg; movb mem, %reg8"
+                              for plain Pentium (P54C) only -- see reg-form note above.}
                             begin
                               hp1 := taicpu.Op_reg_reg(A_XOR, S_L, taicpu(p).oper[1]^.reg,
                                           taicpu(p).oper[1]^.reg);
@@ -439,6 +441,33 @@ unit aoptcpu;
                               Result := True;
                             end;
                    end;
+                A_NOT:
+                  { Pentium / PentiumMMX: NOT %reg is U-pipe-only ("NPI"),
+                    while XOR %reg,$-1 (imm8 sign-extended, 3 bytes vs NOT's
+                    2) pairs in either pipe. Trade 1 byte for V-pipe pairing.
+                    XOR scrambles flags, so only when flags are dead. Skip
+                    memory operands -- larger false-dep + same encoding cost. }
+                  if (taicpu(p).oper[0]^.typ = top_reg) and
+                     not(cs_opt_size in current_settings.optimizerswitches) and
+                     (current_settings.optimizecputype <= cpu_PentiumMMX) and
+                     (
+                       not RegInUsedRegs(NR_DEFAULTFLAGS, UsedRegs) or
+                       (
+                         GetNextInstructionUsingReg(p, hp1, NR_DEFAULTFLAGS) and
+                         RegLoadedWithNewValue(NR_DEFAULTFLAGS, hp1)
+                       )
+                     ) then
+                    begin
+                      { Reshape the 1-op NOT into a 2-op XOR const,reg.
+                        Order matters: read the dest reg from oper[0] while
+                        loading oper[1] (so opercnt grows to 2 first), then
+                        overwrite oper[0] with the constant. }
+                      taicpu(p).loadreg(1, taicpu(p).oper[0]^.reg);
+                      taicpu(p).loadconst(0, -1);
+                      taicpu(p).opcode := A_XOR;
+                      taicpu(p).ops := 2;
+                      Result := True;
+                    end;
                 A_TEST, A_OR:
                   Result:=PostPeepholeOptTestOr(p);
                 A_AND:
