@@ -7,24 +7,27 @@ Help | What's new...
 
 == IDE 1.0.24i / Compiler 3.3.6i ==
 
-  * Inline asm blocks are now scheduled by default when the i386 PMMX
-    scheduler is enabled. Previously every `asm ... end` block in a
-    Pascal proc had to opt in via `{$schedule on}` ahead of it; now
-    `-OoSCHEDULE` (or the IDE's "PMMX asm scheduler" checkbox) is
-    enough -- every reorder-safe block in scope is fair game for the
-    U/V pair reorderer.
+  * Inline asm blocks AND pure-asm procs are now scheduled by default
+    when the i386 PMMX scheduler is enabled. Previously every
+    `asm ... end` block in a Pascal proc had to opt in via
+    `{$schedule on}` ahead of it, and pure-asm procs needed the
+    `schedule` proc modifier; now `-OoSCHEDULE` (or the IDE's "PMMX
+    asm scheduler" checkbox) is enough -- every reorder-safe block in
+    scope is fair game for the U/V pair reorderer.
 
     The new behaviour is gated by a new optimizer switch
     `-OoAUTOSCHEDASM` (default on). `-OoNOAUTOSCHEDASM` falls back to
-    the legacy semantics: only blocks marked with `{$schedule on}` are
-    touched. Pure-asm procs are unaffected -- they continue to opt in
-    via the `schedule` proc modifier (po_schedule_asm). No IDE checkbox
-    for the new switch; opt-out is command-line/fp.cfg only.
+    the legacy semantics: only blocks marked with `{$schedule on}` and
+    pure-asm procs marked with the `schedule` modifier are touched. No
+    IDE checkbox for the new switch; opt-out is command-line/fp.cfg only.
 
-    New regression test `tinlfpc_sched_auto_asm.pp` covers the auto-on
-    path; the legacy negative test `tinlfpc_sched_inline_asm.pp` was
-    updated to add `-OoNOAUTOSCHEDASM` so it keeps testing the
-    boundary case (block left untouched without the directive).
+    New regression tests `tinlfpc_sched_auto_asm.pp` and
+    `tinlfpc_sched_auto_pureasm.pp` cover the auto-on path for inline
+    blocks and pure-asm procs respectively; the legacy negative tests
+    `tinlfpc_sched_inline_asm.pp` and `tinlfpc_sched_modifier.pp` were
+    updated to add `-OoNOAUTOSCHEDASM` so they keep testing the
+    boundary case (block / proc left untouched without the explicit
+    opt-in).
 
 
 == IDE 1.0.24h / Compiler 3.3.6h ==
