@@ -17378,8 +17378,17 @@ unit aoptx86;
               end;
             -1:
               { Don't make this optimisation if the CPU flags are required, since OR scrambles them }
-              if (cs_opt_size in current_settings.optimizerswitches) and
-                (taicpu(p).opsize <> S_B) and
+              if (taicpu(p).opsize <> S_B) and
+                (
+                  (cs_opt_size in current_settings.optimizerswitches)
+{$ifndef x86_64}
+                  { Pentium / PentiumMMX: OR reg,$-1 has a 3-byte encoding
+                    (imm8 sign-extended) and pairs in either pipe, vs the
+                    5-byte MOV imm32. False-dep on the destination is
+                    irrelevant on in-order P5/P55 (no register renaming). }
+                  or (current_settings.optimizecputype <= cpu_PentiumMMX)
+{$endif x86_64}
+                ) and
                 (
                   not RegInUsedRegs(NR_DEFAULTFLAGS,UsedRegs) or
                   (
@@ -17392,7 +17401,7 @@ unit aoptx86;
                   { change "mov $-1,%reg" into "or $-1,%reg" }
                   { NOTES:
                     - No size saving is made when changing a Word-sized assignment unless the register is AX (smaller encoding)
-                    - This operation creates a false dependency on the register, so only do it when optimising for size
+                    - This operation creates a false dependency on the register, harmless on in-order Pentium/PentiumMMX, so it is also enabled there for speed
                     - It is possible to set memory operands using this method, but this creates an even greater false dependency, so don't do this at all
                   }
                   taicpu(p).opcode := A_OR;
