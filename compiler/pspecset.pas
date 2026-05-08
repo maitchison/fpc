@@ -654,10 +654,13 @@ implementation
 
     { Format a single value as a Pascal source literal of the right
       textual form for the param def: `false'/`true' for booleans, the
-      decimal representation for everything else. The wrapper text is
-      pushed through substitutemacro and re-tokenised in the wrapper's
-      scope, so untyped 0 would not match a boolean param's `case' arm. }
+      enum element's identifier for enums, the decimal representation
+      for everything else. The wrapper text is pushed through
+      substitutemacro and re-tokenised in the wrapper's scope, so
+      untyped 0 would not match a boolean or enum param's `case' arm. }
     function value_literal_text(v: int64; param_def: tdef): ansistring;
+      var
+        esym: tsym;
       begin
         if assigned(param_def) and is_boolean(param_def) then
           begin
@@ -665,9 +668,22 @@ implementation
               result := 'false'
             else
               result := 'true';
-          end
-        else
-          result := tostr(v);
+            exit;
+          end;
+        if assigned(param_def) and is_enum(param_def) then
+          begin
+            esym := tenumdef(param_def).int2enumsym(v);
+            if assigned(esym) then
+              begin
+                result := esym.realname;
+                exit;
+              end;
+            { Out-of-range value somehow slipped past parse-time
+              checking; fall through to integer emit so the caller
+              still sees a syntactically-valid literal. The case-arm
+              type-mismatch will surface as a clear compile error. }
+          end;
+        result := tostr(v);
       end;
 
     function param_spec_text(spec: tvarspez): ansistring;
