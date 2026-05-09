@@ -3658,6 +3658,10 @@ begin
       else
         IllegalPara(opt);
     end
+  else if upper(more)='NAMEDARGS' then
+    include(init_settings.optimizerswitches,cs_opt_named_args)
+  else if upper(more)='NAMEDARGS-' then
+    exclude(init_settings.optimizerswitches,cs_opt_named_args)
   else
     begin
       j:=1;
