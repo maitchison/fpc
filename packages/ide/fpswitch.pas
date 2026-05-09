@@ -77,6 +77,13 @@ type
     PBooleanItem = ^TBooleanItem;
     TBooleanItem = object(TSwitchItem)
       IsSet : array[TSwitchMode] of boolean;
+      { Inverse=true: the item's flag (Param) is a negation of a default-on
+        compiler optimisation. Cfg storage stays the same -- IsSet means
+        "the flag was emitted to cfg" -- but the dialog flips presentation
+        so the user sees a positive checkbox that is pre-ticked at default
+        (no flag in cfg) and unticking emits the negation. The flip lives
+        in TSwitches.GetBooleanItem / SetBooleanItem. }
+      Inverse : boolean;
       constructor Init(const n,p:string; AID: TParamID);
       function  NeedParam:boolean;virtual;
       procedure Reset;virtual;
@@ -130,6 +137,7 @@ type
       procedure AddSelectItem(const name,param:string; AID: TParamID);
       procedure AddDefaultSelect(const name:string);
       procedure AddBooleanItem(const name,param:string; AID: TParamID);
+      procedure AddInverseBooleanItem(const name,param:string; AID: TParamID);
       procedure AddLongintItem(const name,param:string; AID: TParamID);
       procedure AddStringItem(const name,param:string;AID: TParamID;mult,allowspaces:boolean);
       procedure AddMultiStringItem(const name,param:string;AID: TParamID);
@@ -275,15 +283,19 @@ const
       opt_level2optimizations = 'Level ~2~ optimizations';
       opt_level3optimizations = 'Level ~3~ optimizations';
       opt_level4optimizations = 'Level ~4~ optimizations';
-      { default ON in -O1+; tick to emit -OoNOSCCINLINEFIRST and disable }
-      opt_no_scc_inline_first = '~N~o SCC inline-first';
-      { default ON; tick to emit -OoNOASMINLINE and disable
-        the assembler-only inline pipeline (escape hatch for splice
-        bugs in the still-experimental cross-unit asm-inline path). }
-      opt_no_asm_inline = 'No ~a~sm-only inline';
-      { default OFF; tick to emit -OoSCHEDULE and enable the
-        PMMX U/V pair-aware asm reorderer for global compiler runs.
-        Effective on -OpPENTIUM/PENTIUMMMX targets; no-op elsewhere. }
+      { positive label: pre-ticked at default (compiler default ON);
+        unticking emits -OoNOSCCINLINEFIRST and force-disables the
+        SCC inline-first correctness pass. Wired via AddInverseBooleanItem. }
+      opt_scc_inline_first = 'SCC ~i~nline-first';
+      { positive label: unticked at default (compiler default OFF);
+        ticking emits -OoASMINLINE and enables the assembler-only inline
+        pipeline (still experimental -- splice/codegen bugs surface as
+        spurious internal errors, hence opt-in). }
+      opt_asm_inline = 'Enable a~s~sembler inline';
+      { positive label: unticked at default (compiler default OFF);
+        ticking emits -OoSCHEDULE and enables the PMMX U/V pair-aware
+        asm reorderer. Effective on -OpPENTIUM/PENTIUMMMX targets;
+        no-op elsewhere. }
       opt_pmmx_scheduler = 'PMMX asm sc~h~eduler';
       { optimization processor target }
       opt_i386486 = 'i~3~86/i486';
@@ -451,6 +463,7 @@ constructor TBooleanItem.Init(const n,p:string; AID: TParamID);
 begin
   Inherited Init(n,p,AID);
   Typ:=ot_Boolean;
+  Inverse:=false;
   Reset;
 end;
 
@@ -644,6 +657,16 @@ begin
 end;
 
 
+procedure TSwitches.AddInverseBooleanItem(const name,param:string; AID: TParamID);
+var
+  P : PBooleanItem;
+begin
+  P:=New(PBooleanItem,Init(name,Param,AID));
+  P^.Inverse:=true;
+  Items^.Insert(P);
+end;
+
+
 procedure TSwitches.AddLongintItem(const name,param:string; AID: TParamID);
 begin
   Items^.Insert(New(PLongintItem,Init(name,Param,AID)));
@@ -705,7 +728,13 @@ begin
   else
     P:=nil;
   if assigned(P) and (P^.Typ=ot_boolean) then
-   GetBooleanItem:=P^.IsSet[SwitchesMode]
+   { Inverse items: cfg-stored IsSet means "user has overridden the
+     default-on feature off"; the dialog presents a pre-ticked positive
+     checkbox, so flip the read-back. }
+   if P^.Inverse then
+     GetBooleanItem:=not P^.IsSet[SwitchesMode]
+   else
+     GetBooleanItem:=P^.IsSet[SwitchesMode]
   else
    GetBooleanItem:=false;
 end;
@@ -773,7 +802,10 @@ begin
   else
     P:=nil;
   if assigned(P) and (P^.Typ=ot_boolean) then
-   P^.IsSet[SwitchesMode]:=b;
+   if P^.Inverse then
+     P^.IsSet[SwitchesMode]:=not b
+   else
+     P^.IsSet[SwitchesMode]:=b;
 end;
 
 
@@ -1310,16 +1342,16 @@ begin
  {$endif m68k}
 {$endif I386}
      { Generic across all CPUs. cs_opt_scc_inline_first lives in
-       genericlevel1optimizerswitches and defaults ON; the IDE box
-       is "tick to disable" -- emits -OoNOSCCINLINEFIRST. }
-     AddBooleanItem(opt_no_scc_inline_first,'oNOSCCINLINEFIRST',idNone);
-     { cs_opt_asm_inline also defaults ON -- "tick to disable"; emits
-       -OoNOASMINLINE so an asm; nostackframe; inline; proc is left as
-       a normal CALL instead of being spliced into the caller. }
-     AddBooleanItem(opt_no_asm_inline,'oNOASMINLINE',idNone);
-     { cs_opt_scheduler defaults OFF; "tick to enable" -- emits
-       -OoSCHEDULE so the i386 PMMX U/V pair reorderer runs. Only
-       effective on -OpPENTIUM[MMX] targets (early-exits otherwise). }
+       genericlevel1optimizerswitches and defaults ON; positive
+       checkbox pre-ticked. Unticking emits -OoNOSCCINLINEFIRST. }
+     AddInverseBooleanItem(opt_scc_inline_first,'oNOSCCINLINEFIRST',idNone);
+     { cs_opt_asm_inline defaults OFF -- positive checkbox; ticking
+       emits -OoASMINLINE so `assembler; nostackframe; inline;` procs
+       are spliced into the caller instead of left as a normal CALL. }
+     AddBooleanItem(opt_asm_inline,'oASMINLINE',idNone);
+     { cs_opt_scheduler defaults OFF; positive checkbox. Ticking
+       emits -OoSCHEDULE so the i386 PMMX U/V pair reorderer runs.
+       Only effective on -OpPENTIUM[MMX] targets (early-exits otherwise). }
      AddBooleanItem(opt_pmmx_scheduler,'oSCHEDULE',idNone);
    end;
   New(ProcessorOptimizationSwitches,InitSelect('O'));

@@ -1,4 +1,4 @@
-{ %OPT=-OoINLINESITEBUDGET=1000 -Si }
+{ %OPT=-OoINLINESITEBUDGET=1000 -OoASMINLINE -Si }
 { %RESULT=0 }
 {
   Test for v4(a) constant-arg specialisation. When the caller passes

@@ -1,4 +1,4 @@
-{ %OPT=-OoINLINESITEBUDGET=1000 -Si }
+{ %OPT=-OoINLINESITEBUDGET=1000 -OoASMINLINE -Si }
 { %RESULT=0 }
 {
   Realistic regression for the cStart RDTSC helper from

@@ -1,4 +1,4 @@
-{ %OPT=-OoINLINESITEBUDGET=1000 -Si }
+{ %OPT=-OoINLINESITEBUDGET=1000 -OoASMINLINE -Si }
 { %RESULT=0 }
 {
   Same-unit asm-inline w/ a default-valued parameter. Caller-side

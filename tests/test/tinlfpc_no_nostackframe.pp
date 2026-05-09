@@ -1,4 +1,4 @@
-{ %OPT=-OoINLINESITEBUDGET=1000 -Si }
+{ %OPT=-OoINLINESITEBUDGET=1000 -OoASMINLINE -Si }
 { %RESULT=0 }
 {
   Regression: an `assembler; inline;` proc without `nostackframe` was
