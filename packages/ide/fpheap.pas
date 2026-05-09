@@ -70,7 +70,8 @@ type
     procedure   HandleEvent(var Event: TEvent); virtual;
     procedure   Refresh;
   private
-    Lines: array[1..14] of PStaticText;
+    Lines: array[1..16] of PStaticText;
+    LineCount: longint;
   end;
 
 { ------------------------------ helpers ----------------------------------- }
@@ -139,13 +140,23 @@ procedure GatherHeapInfo(var info: THeapInfo);
 var
   mi: tmeminfo;
   vi: tdpmiversioninfo;
+  dummy: boolean;
 {$endif}
 begin
   FillChar(info, sizeof(info), 0);
   info.FPC := GetFPCHeapStatus;
   info.DpmiLargestK := -1;
 {$ifdef go32v2}
-  if get_meminfo(mi) then
+  { go32.get_meminfo has a long-standing bug -- it writes __RESULT before
+    calling test_int31, so the boolean it returns is junk AL from int 31h
+    fn 0500h instead of the proper carry-flag-derived bool. Zero the
+    struct, ignore the return, treat any non-zero field as success. The
+    accompanying RTL fix lives in rtl/go32v2/go32.pp; this fallback keeps
+    the dialog useful when running against an older shared units tree. }
+  FillChar(mi, sizeof(mi), 0);
+  dummy := get_meminfo(mi);
+  if (mi.total_physical_pages <> 0) or (mi.available_memory <> 0) or
+     (mi.linear_space <> 0) then
   begin
     info.HasDpmi := true;
     info.HasMemInfoRaw := true;
@@ -203,24 +214,48 @@ end;
 { ----------------------------- dialog ------------------------------------- }
 
 constructor THeapStatusDialog.Init;
+const
+  PreferredW = 70;          { fits "Manager-allocated ... KB  (real DPMI cost)" }
+  MinW       = 60;
+  MaxW       = 96;
+  PreferredH = 18;
+  MinH       = 16;
+  MaxH       = 24;
 var
-  R, R2: TRect;
-  i: longint;
+  R, R2, DR: TRect;
+  i, W, H: sw_integer;
 begin
-  R.Assign(0, 0, 56, 17);
+  Desktop^.GetExtent(DR);
+  W := DR.B.X - DR.A.X - 4;
+  if W < MinW then W := MinW;
+  if W > MaxW then W := MaxW;
+  if W > PreferredW then W := PreferredW;  { don't grow beyond what we'd use }
+  H := DR.B.Y - DR.A.Y - 2;
+  if H < MinH then H := MinH;
+  if H > MaxH then H := MaxH;
+  if H > PreferredH then H := PreferredH;
+
+  R.Assign(0, 0, W, H);
   inherited Init(R, 'Heap status');
   Options := Options or ofCentered;
   EventMask := EventMask or evIdle;
   HelpCtx := hcHeapStatus;
   GetExtent(R); R.Grow(-2, -1);
 
+  { Reserve the bottom row for the OK button. }
+  LineCount := H - 5;
+  if LineCount < 1 then LineCount := 1;
+  if LineCount > 16 then LineCount := 16;
+
   R2.Copy(R); R2.B.Y := R2.A.Y + 1;
-  for i := 1 to 14 do
+  for i := 1 to LineCount do
   begin
     New(Lines[i], Init(R2, ''));
     Insert(Lines[i]);
     R2.Move(0, 1);
   end;
+  for i := LineCount + 1 to 16 do
+    Lines[i] := nil;
 
   InsertOK(@Self);
   Refresh;
@@ -230,13 +265,13 @@ procedure THeapStatusDialog.Refresh;
 var
   info: THeapInfo;
   i: longint;
-  txt: array[1..14] of string;
+  txt: array[1..16] of string;
   idleK: longint;
   S: string;
 
   procedure SetLine(idx: longint; const NewText: string);
   begin
-    if (idx >= 1) and (idx <= 14) and (Lines[idx] <> nil) then
+    if (idx >= 1) and (idx <= 16) and (Lines[idx] <> nil) then
     begin
       DisposeStr(Lines[idx]^.Text);
       Lines[idx]^.Text := NewStr(NewText);
@@ -246,7 +281,7 @@ var
 
 begin
   GatherHeapInfo(info);
-  for i := 1 to 14 do txt[i] := '';
+  for i := 1 to 16 do txt[i] := '';
   idleK := (info.FPC.CurrHeapSize - info.FPC.CurrHeapUsed) shr 10;
 
   txt[1]  := 'IDE memory:';
@@ -265,8 +300,6 @@ begin
   else
   begin
     txt[8]  := '  (DPMI memory info not available on this target)';
-    txt[9]  := '';
-    txt[10] := '';
   end;
   if info.DpmiVerOk then
   begin
@@ -276,10 +309,9 @@ begin
     Str(info.DpmiVerMinor, S);
     txt[11] := txt[11] + S;
   end;
-  txt[13] := '';
-  txt[14] := '"Manager-allocated" never shrinks on go32v2 (no SysOSFree).';
+  txt[13] := '"Manager-allocated" never shrinks on go32v2 (no SysOSFree).';
 
-  for i := 1 to 14 do
+  for i := 1 to 16 do
     SetLine(i, txt[i]);
 end;
 

@@ -5,6 +5,30 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24s / Compiler 3.3.6s ==
+
+  Fixes:
+    * `go32.get_meminfo' now returns the correct boolean. The RTL
+      assembly wrapper used to copy a junk byte from `int 31h fn 0500h'
+      into the result before consulting the carry flag, so callers saw
+      "DPMI memory info unavailable" even when the structure had been
+      populated correctly. Affected the new Heap status dialog and any
+      user code that branched on the return.
+    * Heap status dialog no longer crops long lines. The dialog now
+      sizes itself to the desktop (capped 96x24, min 60x17) so the
+      "(real DPMI cost)" / "(F9 ceiling)" annotations stay visible.
+    * Heap status detail widget falls back to a struct-plausibility
+      check when the RTL fallback is in play (older shared units), so
+      DPMI numbers still display correctly even before the units tree
+      is refreshed.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree. Note: the
+  go32 unit RTL changed, so a `deploy-units.ps1' refresh is required to
+  pick up the fix; older binaries linked against pre-3.3.6s go32.ppu
+  will still work, just with the broken `get_meminfo' return.
+
+
 == IDE 1.0.24r / Compiler 3.3.6r ==
 
   New features:
