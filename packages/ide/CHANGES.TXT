@@ -7,29 +7,15 @@ Help | What's new...
 
 == IDE 1.0.24n / Compiler 3.3.6n ==
 
-  * Assembler-only inline (`assembler; nostackframe; inline;` procs)
-    is now disabled by default. The splice/codegen path is still
-    experimental: a body that hits a rough edge surfaces as a spurious
-    internal error rather than clean diagnostics. Builds that want
-    the optimisation now opt in explicitly:
-
-        fpc -OoASMINLINE myprog.pas
-
-    In the IDE, tick Options | Compiler | Optimizations | "Enable
-    assembler inline". The previous spelling `-OoNOASMINLINE` (and the
-    old "No asm-only inline" checkbox) remains parseable as a no-op so
-    older fp.cfg files don't fail to load.
-
-  * The Optimizations checkbox group now reads as positive ticks
-    instead of mixed double-negatives:
-
-        SCC inline-first         (pre-ticked; untick to disable)
-        Enable assembler inline  (off by default; tick to enable)
-        PMMX asm scheduler       (off by default; tick to enable)
-
-    The cfg flags emitted on save are unchanged
-    (-OoNOSCCINLINEFIRST / -OoASMINLINE / -OoSCHEDULE) so existing
-    fp.cfg files keep round-tripping.
+  Changes:
+    * `assembler; nostackframe; inline;` procs no longer auto-inline; opt
+      in with `-OoASMINLINE` or via Options | Compiler | Optimizations |
+      "Enable assembler inline". `-OoNOASMINLINE` stays parseable as a
+      no-op for back-compat.
+    * Options | Compiler | Optimizations checkboxes now read as positive
+      labels ("SCC inline-first", "Enable assembler inline", "PMMX asm
+      scheduler"), replacing the mixed-polarity old set; the cfg flags
+      emitted on save are unchanged so existing fp.cfg files round-trip.
 
   No PPU format change -- units stamp 336 still applies, all 3.3.6*
   installs continue to share the same X:\fpc\units\336\ tree.
