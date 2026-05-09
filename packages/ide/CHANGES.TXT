@@ -39,6 +39,9 @@ Help | What's new...
       (err 03377). A managed record that already declares `class operator
       Initialize` cannot also use field defaults (err 03378).
 
+  Fixes:
+    * `fpc -io` (i386) now lists the optimizer flags that were already parsed and honoured but missing from the advertised set: ASMINLINE, SCHEDULE, AUTOINLINE, SIZE, DEADVALUES, DEADSTORE, FORCENOSTACKFRAME, CONSTS.
+
   No PPU format change -- units stamp 336 still applies, all 3.3.6*
   installs continue to share the same X:\fpc\units\336\ tree.
 

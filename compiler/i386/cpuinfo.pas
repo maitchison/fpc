@@ -175,16 +175,26 @@ Const
 
    fpu_avx_instructionsets = [fpu_avx,fpu_fma,fpu_avx2,fpu_avx512f];
 
-   { Supported optimizations, only used for information }
+   { Supported optimizations, only used for information.
+     Drives `fpc -i` / `fpc -io`. Must be a superset of every flag the
+     i386 codegen actually honours, otherwise users can't discover
+     them via -io. }
    supported_optimizerswitches = genericlevel1optimizerswitches+
                                  genericlevel2optimizerswitches+
-                                 genericlevel3optimizerswitches-
-                                 { no need to write info about those }
-                                 [cs_opt_level1,cs_opt_level2,cs_opt_level3]+
+                                 genericlevel3optimizerswitches+
+                                 genericlevel4optimizerswitches-
+                                 { no need to write info about the level
+                                   tokens themselves -- those are -O<n>. }
+                                 [cs_opt_level1,cs_opt_level2,cs_opt_level3,cs_opt_level4]+
                                  [cs_opt_peephole{$ifndef llvm},cs_opt_regvar{$endif},cs_opt_stackframe,
                                   cs_opt_loopunroll,cs_opt_uncertain,
                                   cs_opt_tailrecursion,cs_opt_nodecse,cs_useebp,
-				  cs_opt_reorder_fields,cs_opt_fastmath];
+				  cs_opt_reorder_fields,cs_opt_fastmath,
+                                  { Honoured by i386 but not in any generic level set, so
+                                    listed explicitly to make them surface in -i / -io: }
+                                  cs_opt_size,cs_opt_scheduler,cs_opt_autoinline,
+                                  cs_opt_dead_store_eliminate,cs_opt_forcenostackframe,
+                                  cs_opt_consts,cs_opt_asm_inline];
 
    level1optimizerswitches = genericlevel1optimizerswitches;
    level2optimizerswitches = genericlevel2optimizerswitches + level1optimizerswitches +
