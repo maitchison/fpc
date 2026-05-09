@@ -1869,10 +1869,7 @@ end;
             inputfile:=get_source_file(defpos.moduleindex,defpos.fileindex);
             if Assigned(inputfile) and (inputfile.name<>'') then
               begin
-                { Store path+name so IDE consumers can resolve symbols
-                  whose definitions live in include files even when the
-                  .inc directory is not on the source-search path. }
-                New(Reference, Init(ModuleNames^.Add(inputfile.path+inputfile.name),
+                New(Reference, Init(ModuleNames^.Add(inputfile.name),
                   DefPos.line,DefPos.column));
                 Symbol^.References^.Insert(Reference);
               end;
@@ -1885,7 +1882,7 @@ end;
                 inputfile:=get_source_file(ref.refinfo.moduleindex,ref.refinfo.fileindex);
                 if Assigned(inputfile) and (inputfile.name<>'') then
                   begin
-                    New(Reference, Init(ModuleNames^.Add(inputfile.path+inputfile.name),
+                    New(Reference, Init(ModuleNames^.Add(inputfile.name),
                       ref.refinfo.line,ref.refinfo.column));
                     Symbol^.References^.Insert(Reference);
                   end;
