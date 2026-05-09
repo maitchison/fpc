@@ -391,13 +391,13 @@ interface
            did not need this -- it compiled provider impls before
            consumer impls by construction. }
          cs_opt_scc_inline_first,
-         { Asm-only inline pipeline. Default ON. When OFF (-OoNOASMINLINE),
-           is_assembler_inlineable rejects every candidate, so an
-           `assembler; nostackframe; inline;` proc is never spliced --
-           it's emitted as a normal call instead. Escape hatch for the
-           still-experimental cross-unit asm-inline path: if a body
-           tickles a splice/codegen bug, flip this off to fall back to
-           pre-asm-inline behaviour without rebuilding the compiler. }
+         { Asm-only inline pipeline. SHELVED -- default OFF, and dirparse
+           hard-errors if anything tries to enable the bit (cmdline,
+           fp.cfg, or an $OPTIMIZATION ASMINLINE pragma). Known cross-unit
+           splice / codegen bugs surface as occasional miscompiles
+           (e.g. open-array length descriptor corruption, IE 2012082101
+           in ncgbas, IE 200309201 in psub). The bit + option name are
+           kept as a hook for the day the pipeline is stable. }
          cs_opt_asm_inline,
          { Compile-time named arguments at call sites: `f(x, name := value)`.
            Default OFF -- a language-level extension, opt-in via -OoNAMEDARGS

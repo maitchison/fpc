@@ -316,13 +316,13 @@ implementation
       begin
         result:=false;
         reason:='';
-        { Master toggle (-OoNOASMINLINE / IDE checkbox). Default ON.
-          When off, refuse every candidate so callers fall back to a
-          normal CALL. Escape hatch for the still-experimental splice
-          path -- flip this off via fp.cfg to confirm whether a
-          compiler crash or codegen anomaly is asm-inline-related. }
+        { Master toggle. SHELVED -- the bit is unsettable in normal
+          builds, dirparse hard-errors on -OoASMINLINE / pragma.
+          Belt-and-suspenders check: if some future path manages to
+          set the bit anyway, we still reject every candidate so
+          callers fall back to a normal CALL. }
         if not (cs_opt_asm_inline in current_settings.optimizerswitches) then
-          begin reason:='asm-only inlining disabled (-OoNOASMINLINE)'; exit; end;
+          begin reason:='asm-only inlining disabled (shelved)'; exit; end;
         if not (pi_is_assembler in current_procinfo.flags) then
           begin reason:='not an assembler block (pi_is_assembler not set)'; exit; end;
         if not (po_assembler in current_procinfo.procdef.procoptions) then

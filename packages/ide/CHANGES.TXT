@@ -28,6 +28,24 @@ Help | What's new...
       compare the IDE's CurrHeapSize to the DPMI Largest-free-block to
       see how much headroom is left for child programs.
 
+  Changes:
+    * Asm-only inline pipeline shelved -- the Options | Compiler |
+      Optimizations checkbox "Enable assembler inline" is removed,
+      and the compiler hard-errors if `-OoASMINLINE' (or an
+      $OPTIMIZATION ASMINLINE pragma, or anything in fp.cfg) tries
+      to enable the bit. Known cross-unit splice and codegen bugs
+      surface as occasional miscompiles (e.g. open-array length
+      descriptors come back garbled, leading to runtime "Supplied
+      buffer did not have enough bytes" errors from data the
+      compressor produced). `-OoNOASMINLINE' is still accepted as a
+      no-op so old configs and command lines keep building.
+      `assembler; nostackframe; inline;' procs are emitted as a
+      normal CALL.
+    * `-OoASMINLINE' is hidden from `fpc -i' / `fpc -io' so it is no
+      longer surfaced as a user-facing knob. The bit and option name
+      are kept inside the compiler as a hook for the day the splice
+      path is stable.
+
   No PPU format change -- units stamp 336 still applies, all 3.3.6*
   installs continue to share the same X:\fpc\units\336\ tree.
 

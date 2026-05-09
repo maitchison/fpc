@@ -42,7 +42,8 @@ implementation
 
     uses
       cutils,
-      symtable;
+      symtable,
+      verbose;
 
     function UpdateAlignmentStr(s:string;var a:talignmentinfo):boolean;
       var
@@ -177,6 +178,15 @@ implementation
             end;
           if found then
             begin
+              { Asm-only inline pipeline is shelved -- known cross-unit splice
+                and codegen bugs surface as occasional miscompiles
+                (e.g. open-array length descriptor corruption). Refuse to
+                turn the bit on from any source: cmdline, fp.cfg, or an
+                $OPTIMIZATION ASMINLINE pragma. -OoNOASMINLINE / pragma
+                "noasminline" still parse (they exclude a bit that's already
+                clear), so old configs keep building -- only enabling errors. }
+              if (opt=cs_opt_asm_inline) and doset then
+                Comment(V_Fatal,'-OoASMINLINE: asm-only inline pipeline is shelved as unstable; refusing to enable');
 {$if defined(llvm) or defined(wasm32)}
              { -Ooregvar is not supported, llvm will take care of that }
              if opt<>cs_opt_regvar then

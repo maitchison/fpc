@@ -553,13 +553,12 @@ Const
           it is a correctness mode for cross-unit inline expansion
           under the new ctask scheduler, not a code-quality knob. -O-
           (or explicit -OoNOSCCINLINEFIRST) drops it.
-          cs_opt_asm_inline defaults OFF -- the splice/codegen path
-          is still experimental and a body that trips a rough edge
-          surfaces as a spurious IE (2012082101 ncgbas, 200309201
-          psub). Builds that want it pass -OoASMINLINE explicitly;
-          the tinlfpc_asm_inline_* tests do, the IDE has a checkbox
-          for it. -OoNOASMINLINE remains parseable as a no-op for
-          back-compat with cfgs written before the flip. }
+          cs_opt_asm_inline is SHELVED -- default OFF, and dirparse
+          hard-errors if -OoASMINLINE / pragma "asminline" tries to
+          set it. Known cross-unit splice / codegen bugs surface as
+          occasional miscompiles. -OoNOASMINLINE / pragma "noasminline"
+          still parse (they exclude a bit that's already clear), so
+          old cfgs keep building. The IDE no longer offers a checkbox. }
         optimizerswitches : [cs_opt_scc_inline_first];
         genwpoptimizerswitches : [];
         dowpoptimizerswitches : [];

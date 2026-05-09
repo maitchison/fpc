@@ -109,3 +109,7 @@ units
 bin/
 fpmake
 packages/fcl-db/tests/database.ini
+
+# build-output staging dirs (rebuild-host.ps1 writes here)
+/dist/
+/dist-release/
