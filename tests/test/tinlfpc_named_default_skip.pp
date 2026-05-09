@@ -1,4 +1,4 @@
-{ %OPT=-Si }
+{ %OPT=-Si -OoNAMEDARGS }
 { %RESULT=0 }
 {
   The point of named args: skip a middle defaulted parameter without

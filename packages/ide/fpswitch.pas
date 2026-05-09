@@ -297,6 +297,10 @@ const
         asm reorderer. Effective on -OpPENTIUM/PENTIUMMMX targets;
         no-op elsewhere. }
       opt_pmmx_scheduler = 'PMMX asm sc~h~eduler';
+      { default OFF; tick to emit -OoNAMEDARGS and enable named arguments
+        at call sites: f(x, name := value). See CHANGES.TXT 3.3.6o for
+        the spec; positional args must precede the first named one. }
+      opt_named_args = 'Na~m~ed arguments';
       { optimization processor target }
       opt_i386486 = 'i~3~86/i486';
       { Menu labels for -Cp<cputype> / -Op<cputype>. Note: FPC has no
@@ -1353,6 +1357,10 @@ begin
        emits -OoSCHEDULE so the i386 PMMX U/V pair reorderer runs.
        Only effective on -OpPENTIUM[MMX] targets (early-exits otherwise). }
      AddBooleanItem(opt_pmmx_scheduler,'oSCHEDULE',idNone);
+     { cs_opt_named_args defaults OFF; "tick to enable" -- emits
+       -OoNAMEDARGS so call sites accept `name := value' syntax. Strict
+       language extension; existing positional-only code is unaffected. }
+     AddBooleanItem(opt_named_args,'oNAMEDARGS',idNone);
    end;
   New(ProcessorOptimizationSwitches,InitSelect('O'));
   with ProcessorOptimizationSwitches^ do

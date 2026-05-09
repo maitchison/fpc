@@ -1,4 +1,4 @@
-{ %OPT=-Si }
+{ %OPT=-Si -OoNAMEDARGS }
 { %RESULT=0 }
 {
   Overload selected by named arg vs positional. Two overloads with

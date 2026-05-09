@@ -171,6 +171,7 @@ implementation
          prev_in_args,
          old_named_args_allowed,
          allow_name_recognition,
+         effective_allow_named,
          seen_named : boolean;
       begin
          if current_scanner.token=end_of_paras then
@@ -184,7 +185,14 @@ implementation
          { set para parsing values }
          in_args:=true;
          named_args_allowed:=false;
-         allow_name_recognition:=__allow_empty_paras or __allow_named;
+         { Gate the named-arg path: caller-side opt-in plus the
+           cs_opt_named_args optimizer switch (default off; -OoNAMEDARGS or
+           IDE checkbox to enable). __allow_empty_paras (vardispatch) keeps
+           its existing recognition path regardless -- COM dispatch already
+           shipped with name-bearing args. }
+         effective_allow_named:=__allow_named and
+           (cs_opt_named_args in current_settings.optimizerswitches);
+         allow_name_recognition:=__allow_empty_paras or effective_allow_named;
          seen_named:=false;
          p2:=nil;
          repeat
@@ -208,7 +216,7 @@ implementation
                  end
                else
                  begin
-                   if __allow_named and seen_named then
+                   if effective_allow_named and seen_named then
                      Message(parser_e_positional_after_named);
                    p2:=ccallparanode.create(p1,p2);
                  end;

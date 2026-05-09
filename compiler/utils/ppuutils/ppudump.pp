@@ -2537,7 +2537,8 @@ const
          'cs_opt_consts',
          'cs_opt_forloop',
          'cs_opt_scc_inline_first',
-         'cs_opt_asm_inline'
+         'cs_opt_asm_inline',
+         'cs_opt_named_args'
        );
     var
          globalswitch  : tglobalswitch;

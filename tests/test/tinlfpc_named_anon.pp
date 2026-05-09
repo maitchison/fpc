@@ -1,4 +1,4 @@
-{ %OPT=-Si }
+{ %OPT=-Si -OoNAMEDARGS }
 { %RESULT=0 }
 {
   Anonymous-function arg with `Result := ...` in its body. Verifies the

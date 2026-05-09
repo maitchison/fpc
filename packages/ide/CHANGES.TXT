@@ -8,13 +8,13 @@ Help | What's new...
 == IDE 1.0.24q / Compiler 3.3.6q ==
 
   New features:
-    * Named arguments at call sites. Use `name := value' inside an
-      argument list to pick a parameter by name; positional and named
-      arguments may mix freely so long as every positional argument
-      appears before the first named one. Names match parameters
-      case-insensitively (Pascal identifier rules) and can fill any
-      slot, including ones the caller would otherwise have to skip
-      with a sentinel placeholder:
+    * Named arguments at call sites (off by default; opt-in). Use
+      `name := value' inside an argument list to pick a parameter by
+      name; positional and named arguments may mix freely so long as
+      every positional argument appears before the first named one.
+      Names match parameters case-insensitively (Pascal identifier
+      rules) and can fill any slot, including ones the caller would
+      otherwise have to skip with a sentinel placeholder:
 
           procedure run(target: string;
                         retries: longint = 3;
@@ -30,6 +30,13 @@ Help | What's new...
           // mixing positional and several named, in any name order:
           run('host', verbose := true, retries := 5);
 
+      Enable per build with `-OoNAMEDARGS' on the compiler command
+      line, or tick "Named arguments" under Options | Compiler |
+      Optimizations in the IDE. Without the switch, `:=' inside an
+      argument list parses as the existing language-level statement
+      (an error in expression position), so existing code is
+      unaffected.
+
       Errors are reported up-front: an unknown name (no parameter by
       that label), a slot filled twice, or a positional argument after
       a named one all stop the call before codegen. Mixing named
@@ -37,12 +44,6 @@ Help | What's new...
       names for the variadic tail. Variant-dispatch (COM Automation)
       calls keep their existing runtime-dispatch behaviour and are
       unaffected.
-
-      Opt-in: enable `-OoNAMEDARGS` on the command line, or tick
-      Options | Compiler | Optimizations | "Named arguments" in the
-      IDE. Default off so existing positional-only code keeps the
-      identical "':' expected" error on `name := value` in arg
-      position.
 
   No PPU format change -- units stamp 336 still applies, all 3.3.6*
   installs continue to share the same X:\fpc\units\336\ tree.
