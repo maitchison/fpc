@@ -1,0 +1,847 @@
+Free Pascal IDE / Compiler -- changelog
+=======================================
+
+Most recent version first. The IDE shows this file from
+Help | What's new...
+
+
+== IDE 1.0.24r / Compiler 3.3.6r ==
+
+  Changes:
+    * Asm-only inline pipeline shelved -- the Options | Compiler |
+      Optimizations checkbox "Enable assembler inline" is removed,
+      and the compiler hard-errors if `-OoASMINLINE' (or a
+      {$OPTIMIZATION ASMINLINE} pragma, or anything in fp.cfg) tries
+      to enable the bit. Known cross-unit splice and codegen bugs
+      surface as occasional miscompiles (e.g. open-array length
+      descriptors come back garbled, leading to runtime "Supplied
+      buffer did not have enough bytes" errors from data the
+      compressor produced). `-OoNOASMINLINE' is still accepted as a
+      no-op so old configs and command lines keep building.
+      `assembler; nostackframe; inline;' procs are emitted as a
+      normal CALL.
+    * `-OoASMINLINE' is hidden from `fpc -i' / `fpc -io' so it is no
+      longer surfaced as a user-facing knob. The bit and option name
+      are kept inside the compiler as a hook for the day the splice
+      path is stable.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
+== IDE 1.0.24q / Compiler 3.3.6q ==
+
+  New features:
+    * Named arguments at call sites (off by default; opt-in). Use
+      `name := value' inside an argument list to pick a parameter by
+      name; positional and named arguments may mix freely so long as
+      every positional argument appears before the first named one.
+      Names match parameters case-insensitively (Pascal identifier
+      rules) and can fill any slot, including ones the caller would
+      otherwise have to skip with a sentinel placeholder:
+
+          procedure run(target: string;
+                        retries: longint = 3;
+                        verbose: boolean = false);
+          ...
+
+          // positional + named, default `retries' kept:
+          run('host', verbose := true);
+
+          // all-named, declaration order ignored:
+          run(verbose := true, target := 'host');
+
+          // mixing positional and several named, in any name order:
+          run('host', verbose := true, retries := 5);
+
+      Enable per build with `-OoNAMEDARGS' on the compiler command
+      line, or tick "Named arguments" under Options | Compiler |
+      Optimizations in the IDE. Without the switch, `:=' inside an
+      argument list parses as the existing language-level statement
+      (an error in expression position), so existing code is
+      unaffected.
+
+      Errors are reported up-front: an unknown name (no parameter by
+      that label), a slot filled twice, or a positional argument after
+      a named one all stop the call before codegen. Mixing named
+      arguments with `varargs' is rejected -- there are no formal
+      names for the variadic tail. Variant-dispatch (COM Automation)
+      calls keep their existing runtime-dispatch behaviour and are
+      unaffected.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
+== IDE 1.0.24p / Compiler 3.3.6p ==
+
+  Fixes:
+    * Shift+Tab / Ctrl+Enter once again locates symbols after a fresh
+      compile-with-browser; 1.0.24l-1.0.24o regressed most lookups to
+      "symbol not found" because the compiler started recording
+      reference filenames as full paths rather than basenames. Reverted
+      to bare basenames; the IDE now expands them to full paths via the
+      browser-info module's source-file list at lookup time, which still
+      resolves include-file definitions without needing the .inc dir on
+      the source-search path.
+
+
+== IDE 1.0.24o / Compiler 3.3.6o ==
+
+  New features:
+    * `managed record` with per-field defaults. Prefix a record with the
+      `managed` keyword (in either order with `packed`) and the compiler
+      synthesises a class operator Initialize that runs on every local-var
+      entry, New(), and SetLength() so each field starts at its declared
+      default:
+
+          {$mode objfpc}{$modeswitch advancedrecords}
+
+          type
+            tFrameHeader = packed managed record
+              magic:   dword = $DEADBEEF;
+              version: byte  = 1;
+              format:  byte  = 0;
+              flags:   word  = 17;
+            end;
+
+          var
+            h: tFrameHeader;
+          begin
+            // h.magic = $DEADBEEF, h.version = 1, ... already set on entry.
+          end.
+
+      The `managed` modifier is opt-in: a plain record with `field = expr'
+      is rejected ("field default requires `managed record'", err 03376),
+      so existing record types keep their POD layout and zero-cost var
+      entry. v1 supports single-value constants -- integer, byte/word/
+      dword, boolean, char, enum, nil, real. Strings and complex
+      expressions error with "field default expression too complex"
+      (err 03377). A managed record that already declares `class operator
+      Initialize` cannot also use field defaults (err 03378).
+
+  Fixes:
+    * `fpc -io` (i386) now lists the optimizer flags that were already parsed and honoured but missing from the advertised set: ASMINLINE, SCHEDULE, AUTOINLINE, SIZE, DEADVALUES, DEADSTORE, FORCENOSTACKFRAME, CONSTS.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
+== IDE 1.0.24n / Compiler 3.3.6n ==
+
+  Changes:
+    * `assembler; nostackframe; inline;` procs no longer auto-inline; opt
+      in with `-OoASMINLINE` or via Options | Compiler | Optimizations |
+      "Enable assembler inline". `-OoNOASMINLINE` stays parseable as a
+      no-op for back-compat.
+    * Options | Compiler | Optimizations checkboxes now read as positive
+      labels ("SCC inline-first", "Enable assembler inline", "PMMX asm
+      scheduler"), replacing the mixed-polarity old set; the cfg flags
+      emitted on save are unchanged so existing fp.cfg files round-trip.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
+== IDE 1.0.24m / Compiler 3.3.6m ==
+
+  * `param: T specialize [...]' now accepts enum-typed parameters.
+    Previously the modifier was documented as accepting any ordinal
+    type, but only `boolean' and integer values produced a compilable
+    dispatch stub -- enum lists hit "Constant and CASE types do not
+    match" because the synthesized case-arms emitted raw integers
+    instead of enum element identifiers. The compiler now emits the
+    matching element name for each value, mirroring the existing
+    boolean special case:
+
+        type
+          tMode = (mOff, mOn, mDebug);
+
+        procedure run(m: tMode specialize [mOff, mOn, mDebug];
+                      n: longint);
+        begin
+          case m of
+            mOff:   writeln('off ', n);
+            mOn:    writeln('on ', n);
+            mDebug: writeln('dbg ', n);
+          end;
+        end;
+
+    Constant call sites still inline to a direct wrapper call; runtime
+    call sites still produce the case-table dispatch.
+
+    No PPU format change -- units stamp 336 still applies, all 3.3.6*
+    installs continue to share the same X:\fpc\units\336\ tree.
+
+
+== IDE 1.0.24l / Compiler 3.3.6l ==
+
+  * Shift+Tab (Peek definition) and Ctrl+Enter (Go to definition) now
+    follow symbols whose declarations live in include (.inc) files. The
+    browser-info collector previously recorded only the bare basename
+    for each symbol's defining position, so the editor could only open
+    the file when its directory happened to be on a -Fu/-Fi search path
+    -- a procedure declared in shared\poly_ref.inc and included from
+    video\foo.pas would come back as "symbol not found". The full path
+    is now stored alongside the line/column, so:
+
+        (in foo.pas)
+        {$I shared\poly_ref.inc}
+        ...
+        polyDraw_REF(...);     <- cursor here, Shift+Tab pops the peek
+                                  view at shared\poly_ref.inc:2
+
+    Same prerequisite as before: at least one successful compile with
+    Options|Compiler|Browser turned on (or `-b` on the command line).
+
+  * Alt+A (Search | Jump to asm) now works from inside an include file.
+    The assembler emits one .s per compiled unit, with `# [FILE.INC]`
+    markers identifying include-file spans; previously the IDE looked
+    for FOO.S when the editor was on FOO.INC and gave up. The .s lookup
+    now consults browser info to find the parent unit's main source and
+    aims at PARENT.S, then uses the existing per-source marker matching
+    to land on the right line:
+
+        (cursor on poly_ref.inc:30, included by foo.pas)
+        Alt+A  ->  opens foo.s, scrolls to the asm emitted for line 30
+                   of poly_ref.inc
+
+    If browser info hasn't been built yet you get a clear "compile with
+    browser info first" message instead of the generic "no .s file".
+
+
+== IDE 1.0.24k / Compiler 3.3.6k ==
+
+  * Better i386 codegen for in-order Pentium / Pentium MMX targets
+    (`-OpPENTIUM` / `-OpPENTIUMMMX`). Two peephole rules now fire
+    that previously did not, producing slightly larger but
+    pairing-friendlier code:
+
+        notl  %eax            -->  xorl  $-1, %eax
+        movl  $-1, %eax       -->  orl   $-1, %eax
+
+    On the original Pentium and Pentium MMX, `not` and the 5-byte
+    `mov $-1, reg` form are U-pipe-only / longer to decode; the
+    `xor`/`or` rewrites pair in either pipe and the `or` form
+    encodes in 3 bytes via the imm8-sign-extended opcode. Both
+    rewrites stay silent under `-OpPENTIUM2` and later (where
+    out-of-order execution makes the false-dep on the destination
+    visible), and under `-Os` the existing size-only behaviour is
+    unchanged.
+
+    No change to PPU format -- units stamp 336 still applies, all
+    3.3.6* installs continue to share the same X:\fpc\units\336\
+    tree.
+
+  * Comment-only fix in the existing `movzbl reg/mem -> xorl reg,reg ; movb`
+    splitter: the rewrite is gated on `cpu_Pentium` only, not
+    `cpu_PentiumMMX`. On P55C the 0Fh prefix decodes free and `movzx`
+    pairs in either pipe, so the bare `movzbl` is the right output
+    there. The code already had this behaviour; the comment now matches.
+
+
+== IDE 1.0.24j / Compiler 3.3.6j ==
+
+  * `{$schedule on}` / `{$schedule off}` now toggles the i386 PMMX
+    scheduler uniformly across the rest of the current scope -- not
+    just for the next inline asm block. Default state is whatever
+    `-OoSCHEDULE` says on the command line (or the IDE's "PMMX asm
+    scheduler" checkbox); the directive overrides it region-by-region:
+
+        {$schedule on}
+        procedure hot_path; begin {... scheduled ...} end;
+        {$schedule off}
+        procedure cold_path; begin {... not scheduled ...} end;
+
+    The `-OoAUTOSCHEDASM` switch added in 3.3.6i is gone (it became
+    redundant under the new model). The `schedule` proc modifier on
+    pure-asm procs still works as a force-on override even when the
+    global switch is off.
+
+  * The PMMX scheduler now interleaves independent register chains
+    that share a procedure body. A program shaped like
+
+        movd  mm1, eax        }  chain A: mm1 RAW chain
+        paddw mm1, mm1; ...   }
+        movd  mm2, ebx        }  chain B: mm2 RAW chain on
+        paddw mm2, mm2; ...   }            disjoint registers
+
+    used to compile in source order (1 U/V pair, 7 cycles); the
+    scheduler now reorders it to
+
+        movd  mm1, eax | movd  mm2, ebx
+        paddw mm1, mm1 | paddw mm2, mm2
+        paddw mm1, mm1 | paddw mm2, mm2
+        paddw mm1, mm1 | paddw mm2, mm2
+
+    -- 4 U/V pairs, 4 cycles, ~3 cycles saved on PMMX hardware.
+    Internally this drops an over-eager top-level gate ("if cur
+    already pairs with prv, don't try to hoist") and iterates the
+    forward walk to fixpoint so each successful hoist can unlock
+    further ones upstream.
+
+  * The scheduler now drops a `# scheduler: <module>.<proc>: N
+    swap(s)` comment into the .s output of every proc it visits,
+    regardless of swap count. Previously a 0-swap proc was
+    indistinguishable in the .s from a proc the scheduler skipped
+    entirely; now `grep "scheduler:" foo.s` answers "did the pass
+    actually run on this proc" at a glance.
+
+  * New regression test `tinlfpc_sched_cascade_chains.pp` covers the
+    chain-A-then-chain-B interleaving case end-to-end (compile +
+    run + verify mm1=32, mm2=56). `tinlfpc_sched_asm_mmx.pp` and
+    `tinlfpc_sched_no_churn.pp` were updated -- the former now
+    asserts SCHED_SWAPS_MIN=1 since the cascade fix exposes the
+    interleaving opportunity its body always had; the latter's
+    body was rewritten to one with genuinely no reordering room
+    (4 reg-imm movs + 3 chained leas), preserving the test's role
+    as a churn-guard.
+
+
+== IDE 1.0.24i / Compiler 3.3.6i ==
+
+  * Inline asm blocks AND pure-asm procs are now scheduled by default
+    when the i386 PMMX scheduler is enabled. Previously every
+    `asm ... end` block in a Pascal proc had to opt in via
+    `{$schedule on}` ahead of it, and pure-asm procs needed the
+    `schedule` proc modifier; now `-OoSCHEDULE` (or the IDE's "PMMX
+    asm scheduler" checkbox) is enough -- every reorder-safe block in
+    scope is fair game for the U/V pair reorderer.
+
+    The new behaviour is gated by a new optimizer switch
+    `-OoAUTOSCHEDASM` (default on). `-OoNOAUTOSCHEDASM` falls back to
+    the legacy semantics: only blocks marked with `{$schedule on}` and
+    pure-asm procs marked with the `schedule` modifier are touched. No
+    IDE checkbox for the new switch; opt-out is command-line/fp.cfg only.
+
+    New regression tests `tinlfpc_sched_auto_asm.pp` and
+    `tinlfpc_sched_auto_pureasm.pp` cover the auto-on path for inline
+    blocks and pure-asm procs respectively; the legacy negative tests
+    `tinlfpc_sched_inline_asm.pp` and `tinlfpc_sched_modifier.pp` were
+    updated to add `-OoNOAUTOSCHEDASM` so they keep testing the
+    boundary case (block / proc left untouched without the explicit
+    opt-in).
+
+
+== IDE 1.0.24h / Compiler 3.3.6h ==
+
+  * Fixed: a `specialize-set` parameter in one unit could break the
+    next unit compiled in the same program build. Symptom: the FIRST
+    method body parsed in the next unit suddenly failed with phantom
+    "Identifier not found" or "inherited member not visible" cascades
+    against members the class clearly had. Hit in the wild on
+    uVesaDriver.pas (setLogicalSize lost sight of inherited
+    bitsPerPixel / videoMemory) whenever a unit earlier in the build
+    used a specialize-set parameter. The fix is internal -- no source
+    changes needed.
+
+
+
+  * i386 PMMX scheduler -- much smarter. The U/V reorderer added in
+    3.3.6c learned three new tricks:
+
+      - MMX-aware. MMX arithmetic, compares, logicals, pack/unpack
+        and movd/movq now count as pairable; MMX multiplies and
+        shifts pair too, but only on the U pipe (so two PMULLWs in
+        a row no longer get falsely paired). EMMS, FEMMS, PUSH /
+        POP, ENTER / LEAVE became hard barriers and are never
+        reordered across.
+
+      - Wider window. The old pass only looked at the immediate
+        [pairable, non-pairable, pairable] shape. The new pass
+        walks back up to 8 instructions from each pairable slot
+        looking for a partner, skipping intermediates as long as
+        every adjacent swap stays safe.
+
+      - No-op-pair detection. Skips swaps that would just shuffle
+        which adjacency carries an already-paired instruction --
+        zero benefit, real .s diff, not worth doing.
+
+    Per-swap markers and -vd output from 3.3.6f carry through
+    unchanged: every applied swap drops a `# sched-swap' line into
+    the .s, and -vd shows per-swap / per-proc / per-unit /
+    per-compile counts.
+
+    test-lite gained `%SCHED_SWAPS_MIN=N' and `%SCHED_SWAPS_MAX=N'
+    directives for range assertions; `%SCHED_SWAPS=N' keeps its
+    exact-match semantics.
+
+
+== IDE 1.0.24f / Compiler 3.3.6f ==
+
+  * i386 PMMX scheduler now reports what it did. Each successful
+    [P, NP, P] -> [P, P, NP] hoist drops a `# sched-swap' comment
+    into the .s at the swap site, so a developer (or test harness)
+    can see exactly which instructions were paired. -vd adds a
+    one-line per-swap detail, plus per-proc and per-unit summary
+    lines:
+
+        [scheduler] swap: mov | shl | mov -> mov | mov | shl
+        [scheduler] system.fpc_ansistr_assign: 4 swap(s) (~4 cy)
+        [scheduler] unit system: 73 swap(s) (~73 cy)
+
+    A per-compile grand total surfaces at default verbosity (no -v
+    flag needed) when the scheduler fired at least once:
+
+        [scheduler] total: 1832 swap(s) (~1832 cy)
+
+    Cycle estimate is N x 1 -- each swap forms exactly one new U/V
+    pair on PMMX, saving one straight-line cycle. No loop weighting.
+    Two new regression tests bracket the behaviour:
+    `tinlfpc_sched_visible_swap' (positive control: hand-crafted
+    [movl, shll, movl, addl] in a `schedule;' asm proc; expects
+    exactly one marker) and `tinlfpc_sched_asm_mmx' (MMX inline-asm
+    body opted in via `{$schedule on}'; expects zero markers under
+    v1's integer-only pairable set). The lite-suite directive
+    %SCHED_SWAPS=N (with optional %SCHED_SWAPS_MIN/_MAX bounds)
+    asserts the marker count after a successful compile.
+
+  * `RDTSC' compiler intrinsic on i386. New inline node `in_x86_rdtsc'
+    binds the i386 RDTSC opcode (read time-stamp counter) into a
+    64-bit qword result via the standard EDX:EAX register-pair
+    pattern, so a Pascal-only `cStart'/`cStop' can read the TSC
+    without an asm block. When nothing else is live in EAX/EDX the
+    regalloc collapses the body to the bare RDTSC at the call site.
+    i386 only for now -- x86_64 also returns EDX:EAX but combining
+    them into a single 64-bit register needs a shl/or pair we haven't
+    implemented yet. Exposed via `intrinsics' unit; smoke test in
+    tinlfpc_rdtsc.
+
+  * ppudump now builds clean again. Commit 2397daec6b6 (IDE
+    checkboxes for asm-only inline + PMMX scheduler) added three
+    new enum values -- `cs_schedule_asm', `cs_opt_asm_inline',
+    `po_schedule_asm' -- without updating the parallel string and
+    mask arrays in ppudump.pp, so `make utils_all' bombed with
+    "Expected another 1 array elements". Three one-line additions.
+
+
+== IDE 1.0.24e / Compiler 3.3.6e ==
+
+  * IDE Options | Compiler | Optimizations grew two new checkboxes for
+    the recent asm-related compiler switches:
+
+      [ ] No asm-only inline       (cs_opt_asm_inline -- default ON)
+      [ ] PMMX asm scheduler       (cs_opt_scheduler  -- default OFF)
+
+    The first is the kill-switch for the still-experimental asm-only
+    inline pipeline (cross-unit splice, register-cc paras, register
+    return). When ticked, fp.cfg gets -OoNOASMINLINE and
+    is_assembler_inlineable rejects every candidate up-front; an
+    `assembler; nostackframe; inline;' proc is then emitted as a
+    normal CALL. Useful when chasing a compile-time crash that's
+    suspected to be in the splice path -- flip the box, recompile,
+    see whether the crash goes away.
+
+    The second exposes the PMMX U/V pair scheduler (added in 3.3.6c)
+    as an IDE-discoverable toggle. Tick it to add -OoSCHEDULE; pair
+    with the Processor tab's PENTIUM or PENTIUMMMX target for it to
+    actually fire (the scheduler early-exits on other CPUs).
+
+    Both switches are also reachable via the command line (-OoXXXX),
+    fp.cfg, and the new test-play.ps1 harness's -NoAsmInline /
+    -Scheduler flags.
+
+  * test-play.ps1 -- new go32v2-native regression-test harness for
+    dev\video\play.pas. Mirrors test-lite.ps1 in spirit (run-after-
+    rebuild, exit-code-gated) but cross-compiles inside DOSBox-X with
+    cycles=max + core=dynamic, captures compile.txt for crash
+    analysis, and supports the two flags above for bisecting compiler
+    regressions against play.pas without touching dev\video\.
+
+
+== IDE 1.0.24d / Compiler 3.3.6d ==
+
+  * `specialize-set' parameters can now declare a default value:
+
+        procedure dith(k: integer specialize [1, 4, 8] = 4);
+        procedure flag(b: boolean specialize [true, false] = true);
+
+    Callers can omit the argument; `dith()' is the same as
+    `dith(4)', and the constant-call collapse to a direct call
+    into the matching specialisation works for the omitted-arg
+    form too.
+
+    The default is required to be a member of the set -- writing
+    `k: integer specialize [1, 4, 8] = 2' is rejected at compile
+    time, because the compiler-generated case-table dispatch has
+    no else arm and a stray default would otherwise fall through
+    at runtime.
+
+== IDE 1.0.24c / Compiler 3.3.6c ==
+
+  * Pascal-style block comments (`{...}', `(*...*)', `//...') inside
+    a `specialize-set' asm body no longer break the next unrelated
+    proc. Pre-fix, an asm body that contained a `{...}' or `//'
+    comment confused the per-value wrapper synthesis enough that the
+    next proc in the same unit failed to parse with cascading
+    "Unrecognized opcode ASM" errors. All three comment forms now
+    work inside specset-asm bodies.
+
+  * `schedule' proc modifier and `{$schedule on}' directive let
+    user-written asm opt in to the i386 PMMX U/V scheduler:
+
+        procedure foo; assembler; nostackframe; schedule;
+        ...
+
+        {$schedule on}
+        asm
+          ...
+        end;
+
+    The default behaviour stays "skip user asm" so existing code is
+    untouched; the modifier flips po_schedule_asm on the procdef so
+    psub.pas runs the scheduler over the body anyway, and the
+    directive stamps cs_schedule_asm onto the asm-block marker so
+    TAsmScheduler.Optimize processes the block. Both flags are
+    masked off at PPU boundaries, so they stay local-compile-time
+    hints and don't move the .ppu format.
+
+  * i386 PMMX U/V pair-aware reorderer (post-peephole, opt-in).
+    A new compiler/i386/schedi386.pas walks each basic block looking
+    for [UV-pairable, non-pairable, UV-pairable] shapes and hoists
+    the third instruction past the second so the first and third
+    issue together as a U/V pair on Pentium / Pentium-MMX. Net
+    saving on PMMX is one cycle per applied swap. Gated by
+    `-OoSCHEDULE' plus `-Op[PENTIUM | PENTIUMMMX]'; default OFF;
+    -O2/-O3 do not pull it in. Use `{$schedule on}' (above) to
+    extend the pass to user asm blocks.
+
+  * `assembler; nostackframe; inline;' procs now accept default-
+    valued parameters. The gate that rejected them was a stale
+    belt-and-braces from before the asm-inline PPU round-trip fix;
+    omitted optional args are now materialised as
+    `genconstsymtree(defaultconstsym)' and flow through the v2(c)
+    hoist+rcd_load splice path with no codegen changes. Verified
+    on same-unit and cross-unit (PPU round-trip) shapes.
+
+
+== IDE 1.0.24b / Compiler 3.3.6b ==
+
+  * Const-prop / DFA now runs on Pascal procs that inline pure-asm
+    helpers. Pre-fix, a single inline-asm helper call (e.g.
+    `cStart(slot)') inside a 200-line Pascal procedure disabled
+    constant propagation, dead-store elimination, and branch folding
+    for the whole rest of the procedure -- well past the splice
+    site. The optimiser now recognises the spliced asm body as
+    "validated pure-asm helper" and keeps DFA enabled. User-written
+    `asm ... end;` blocks in your own code still disable DFA on the
+    enclosing proc as before; only spliced clones of inline-asm
+    helpers get the new treatment.
+
+
+== IDE 1.0.24a / Compiler 3.3.6a ==
+
+  * Inline-asm constant-arg specialisation. When the caller passes
+    an integer literal or `nil` to a register-cc parameter of a
+    pure-asm `inline` proc, the compiler now loads the constant
+    straight into the para's home register instead of routing it
+    through a stack temp. Net effect at every such call site: one
+    `mov reg, $imm` instead of `mov [slot], $imm ; mov reg, [slot]`.
+    Common case for `myinline(0, x)`, flag/mask args, etc.
+
+  * Clearer error when a `.ppu` file is from a different compiler
+    version. The previous wording was just "Can't compile unit FOO,
+    no sources available", with the actual cause ("PPU Invalid
+    Version") buried at the unusual `-vu' verbosity level. The
+    fatal line now spells out the version mismatch directly --
+    the usual fix is to delete the old `.ppu' or rebuild against
+    the matching compiler.
+
+
+== IDE 1.0.24 / Compiler 3.3.6 ==
+
+  * Cross-unit asm-inline now actually inlines instead of crashing
+    the compiler or producing corrupt object files. A helper like
+    cStart declared `assembler; nostackframe; inline;` in one unit
+    and called from another now splices into the caller -- no more
+    `Page Fault at eip=0` / EAccessViolation when compiling
+    dev/video, no more `Undefined symbol: <garbled>` from the
+    linker. Same-unit asm-inline is unchanged.
+
+  * Version renumbered to follow the rule: bump the third digit
+    only when the .ppu format changes; otherwise add a letter
+    suffix. The previous "3.3.9c" lineage was a c-bump series
+    where the .ppu format never actually changed -- they have all
+    been retroactively rewritten as 3.3.5* letter suffixes in this
+    changelog (see entries below). This release is the first true
+    PPU-breaking bump since 3.3.5, so it lands as 3.3.6, and the
+    shared units now sit at `X:\fpc\units\336\`. The old
+    `X:\fpc\units\335\` (and any earlier) trees stay intact for any
+    pre-3.3.6 install you still need to use.
+
+
+== IDE 1.0.23c / Compiler 3.3.5g ==
+
+  * `%if` inside `asm` blocks of `specialize-set` procedures.
+    Conditional asm gated on a specialize-set parameter now folds
+    correctly per specialisation:
+
+        procedure yog_to_16_mmx(page: tYOG420; yofs: integer = 0;
+                                use_dither: boolean specialize [true, false]);
+        begin
+          asm
+            ...
+            %if use_dither
+              paddusb mm4, dither8[eax*8]
+              paddusb mm5, dither4[eax*8]
+              paddusb mm6, dither8[eax*8]
+            %endif
+            ...
+          end;
+        end;
+
+    Two specialised copies are emitted -- one with the conditional
+    block spliced in, one without -- and the dispatch stub folds
+    constant call sites to a direct call into the matching wrapper.
+
+  * Asm const-expression evaluator handles untyped ordinal constants.
+    `%if` (and `db`, `dw`, etc.) accepts an in-scope `const k = N;`
+    or `const k = TRUE;` reference and inlines the integer value.
+    Boolean/char/enum/integer constants all work; the previous
+    behaviour was "wrong sym type" for any non-staticvar const.
+
+  * Wrapper procs synthesised by specialize-set inherit the source
+    proc's `inline;' directive instead of being unconditionally
+    marked inline. Asm-bodied wrappers (and any other body that
+    triggers `pio_inline_not_possible') now stay regular calls,
+    avoiding spurious notes -- the dispatch stub is still inline,
+    so constant call sites continue to fold to a direct call.
+
+
+== IDE 1.0.23b / Compiler 3.3.5f ==
+
+  * `codegen-proc` parameter modifier (v5). A parameter declared
+    `codegen` lets the body of the proc emit a single inline-asm
+    template that the compiler patches per call site with the
+    actual operand of that argument. Both immediate and pointer
+    operands are supported, including memory-displacement patch
+    sites (e.g. `mov eax, [ebx + arg]`). One template, many
+    specialised emit sites -- no per-call thunk, no register
+    shuffling.
+
+  * `assembler; nostackframe; inline;` accepts cross-register
+    reads of register-cc parameters. Previously the body had to
+    consume each register-cc param from the register the calling
+    convention placed it in (eax/edx/ecx for the first three
+    integer args). Now the body may read `arg` from a different
+    register and the compiler rewrites the access at splice time.
+    Lets you write the body in whatever register layout suits the
+    instruction sequence rather than the cc.
+
+  * Quieter inline diagnostics. `-vy` no longer echoes a "Not
+    inlining ..." line for every call site of a proc the parser
+    already rejected once (self-recursion, pio_inline_not_possible,
+    missing inlining-info). Per-call-site diagnostics are now
+    reserved for site-specific reasons -- SCC defer, budget
+    exceeded, hidden-symbol cross-unit, unsafe param construct.
+
+
+== IDE 1.0.23a / Compiler 3.3.5e ==
+
+  * New `specialize-set` parameter modifier. When a parameter
+    only ever takes a few known constant values, you can list
+    them and the compiler will generate a fast specialised
+    path for each:
+
+        procedure f(a: integer; k: integer specialize [1, 4, 8]);
+        begin
+          writeln(a + k * 100);
+        end;
+
+    Constant call sites collapse to a direct call into the
+    matching specialisation; variable call sites become a small
+    case-table dispatch. Set syntax accepts literals, named
+    consts, and ranges: [1, 4, 8], [0..3], [0, 2, 4..7]. Up to
+    64 specialisations per proc; parameter type must be ordinal.
+
+    Limitations in this first cut: no methods (class/record/
+    object); only one specialize-set parameter per proc; can't
+    self-recurse from inside the body; can't mix with regular
+    overloads of the same name in the same scope.
+
+
+== IDE 1.0.23 / Compiler 3.3.5d ==
+
+  * Intel asm conditionals. `%if / %elseif / %else / %endif`
+    now work inside Intel-syntax asm blocks, with the usual
+    integer arithmetic and in-scope const references in the
+    condition. AT&T asm is unchanged.
+
+  * Inlining is more aggressive by default. The classic depth-
+    decay formula has been replaced with a flat per-call-site
+    budget (1000 nodes), so mid-sized helpers no longer get
+    rejected just for being four calls deep. To restore the
+    previous behaviour: `-OoINLINESITEBUDGET=0`.
+
+  * Better diagnostics when an `assembler; inline;` proc is
+    rejected. Instead of the bare "assembler not yet supported
+    inside inline procedure", the compiler now tells you exactly
+    why -- missing `nostackframe`, unsupported parameter type,
+    wrong calling convention, etc.
+
+  * Inline-tuning knobs. Four `-Oo<KEY>=N` options to tune
+    inlining policy:
+        -OoINLINEAUTOLIMIT=N    auto-inline gate (default 25)
+        -OoINLINEHARDCAP=N      hard per-site body cap
+        -OoINLINEGROWTHCAP=N    cumulative growth cap per proc
+        -OoINLINESITEBUDGET=N   flat per-site budget (default 1000;
+                                set 0 for the legacy depth formula)
+    Use `-vy` to see why a call wasn't inlined and `-vd` to see
+    auto-inline decisions.
+
+
+== IDE 1.0.18 .. 1.0.22 / Compiler 3.3.4, 3.3.5, 3.3.5a, 3.3.5b, 3.3.5c ==
+
+(These features rolled in over several versions. Listed here
+together because they form one coherent extension to inline
+assembler. Versions 3.3.6..3.3.9 in earlier drafts of this file
+have been renumbered as 3.3.5a..3.3.5c -- those bumps did not
+change the .ppu format and so do not warrant a c-digit bump under
+the current rule. 3.3.4 + 3.3.5 are the legitimate c-bumps in this
+range.)
+
+  * Inline assembler functions. Procedures and functions
+    declared `assembler; nostackframe; inline;` are now spliced
+    directly into the caller -- no `call`/`ret`, just the body's
+    instructions emitted in place. This started as zero-arg
+    void-return procs and grew incrementally:
+
+      - bodies may reference globals and typed constants
+      - bodies may use local labels and branch between them;
+        each splice gets its own fresh set of labels so the same
+        helper can be inlined many times in one routine
+      - functions may return a value when the result fits in a
+        single integer register (longint, dword, pointer, ...)
+      - parameters may be taken in registers (the default
+        `register;` cc on i386 puts the first three integer args
+        in `%eax`, `%edx`, `%ecx`, and the body sees them there
+        directly -- no need to name them in the body)
+
+    Combined, these let you write things like:
+
+        function add(a, b: longint): longint;
+          register; assembler; nostackframe; inline;
+        asm
+          addl %edx, %eax
+        end;
+
+    and have `x := add(1, 2) + add(3, 4);` collapse to four
+    inline `addl` instructions plus the loads needed by the
+    caller. Stack-passed args, by-reference params (var/out/
+    constref), FPU/MM-register params, and float/multi-register
+    returns are still rejected by the gate.
+
+    Treat this as a useful but lightly-tested extension. If a
+    pure-asm proc that compiled fine before suddenly errors or
+    produces strange code, the inliner is the first thing to
+    suspect -- removing the `inline;` directive is a quick way
+    to confirm.
+
+  * `var x: T align N;` for static globals. Lets a single
+    declaration request stricter alignment than the target's
+    default cap -- handy for MMX/SSE scratch globals on go32v2
+    that need 8/16-byte alignment without a getmem-and-align
+    dance:
+
+        var mmreg : qword align 8;
+        var sse_buf : array[0..3] of single align 16;
+
+    N must be a power of two in 1..128. Initialised vars
+    (`var x: T align N = init;`) are limited to N <= 4 on
+    go32v2 (DJGPP COFF object-format constraint); the compiler
+    raises an error rather than silently clamping. Locals and
+    parameters are not aligned (the prologue does not realign
+    ESP).
+
+
+== IDE 1.0.17 / Compiler 3.3.3 ==
+
+  * Quick-Open (Ctrl+U): typing a `.` in the filter now matches
+    the full basename, so files outside the editor's mask (e.g.
+    `play.log`) show up as you type. Pressing Enter on an entry
+    with a `.` that has no listbox match resolves the literal
+    text against the project dir and every -Fu/-Fi search dir
+    and opens it if found.
+
+  * File|Open, File|Open Recent, and OpenSearch no longer open
+    a second editor window when the file is already open --
+    they focus the existing window instead. (File|New still
+    creates a fresh untitled window.) Stops the same file
+    ending up loaded twice with diverging unsaved edits.
+
+
+== IDE 1.0.16 / Compiler 3.3.3 ==
+
+IDE
+  * Quick-Open (Ctrl+U): mask textbox to filter the file list
+    by extension or name pattern; persists across sessions.
+    Result list sorts so .pas/.pp sources show ahead of .ppu/.o
+    build artefacts.
+  * DOS Shell: command prompt is marked so you can tell you're
+    in a shell-out; refuses to re-enter while one is already
+    running -- avoids the stacked-IDE / leaked-temp-files trap.
+  * Editor color fixes; new INI and ASM file syntax highlighting.
+  * Run profiles: named bundles of (main file, run params),
+    switchable from the Run menu. Per-project, persisted with
+    the desktop.
+  * Alt+Up / Alt+Down: jump between interface declaration and
+    implementation of the procedure under the cursor.
+  * Ctrl+Enter go-to-definition; Alt+Left / Alt+Right back/
+    forward navigation history (browser-style).
+  * Shift+Tab peek-definition popup -- shows the declaration of
+    the symbol under the cursor without leaving your spot.
+  * Find in Files: dialog state (last query, mask, options)
+    persists across sessions; fixed a command-code clash that
+    was triggering Comment-selection instead.
+  * Search | Jump to Asm: grayed out when no source is focused.
+  * Wordstar prefix chord (Ctrl-K, Ctrl-Q) no longer eats its
+    second key when that key matches a menu hot-key letter
+    (e.g. Ctrl-K W).
+  * Help | What's new...: this dialog.
+  * About box and splash banner now show "-O3" suffix when the
+    binary was built with the -O3 chain.
+
+Compiler
+  * Faster symbol browsing on large projects (browcol switched
+    from a sorted collection to a hash table -- the old
+    O(N log N) insert dominated on big projects).
+
+
+== IDE 1.0.15 / Compiler 3.3.2 ==
+
+First version to stamp the build commit short hash into the
+binary banners (e.g. "3.3.2-a885a49" / "1.0.15-a885a49").
+
+IDE
+  * Ctrl+U Quick-Open by filename across project + -Fu/-Fi paths.
+  * Find in Files (Ctrl+Shift+F), results in the Messages window.
+  * Search | Jump to Asm Source (Alt+A); auto-recompiles -al if
+    needed.
+  * Open source files maximized + optional chromeless full-screen
+    mode (F5 toggles); two new flags in Options | Editor.
+  * S3-specific wide text-mode probe runs after VBE enumeration
+    so S3-family chipsets expose the 100/132-column modes that
+    the BIOS hides.
+  * Recent Files uses move-to-front MRU on every open.
+  * DOS Shell / File|Open anchor to the IDE's launch directory.
+  * Pentium CPU-target menu labels corrected (-CpPENTIUM2 was
+    mis-labelled "PentiumMMX" -- selecting it on a real P55C
+    crashed with invalid-opcode / page fault).
+
+Compiler (i386)
+  * New PENTIUMMMX cputype (P55C; P5 + MMX, no CMOV) between
+    Pentium and Pentium 2.
+  * -CpPENTIUM4 and friends now auto-define CPUX86_HAS_MMX /
+    _SSEUNIT / _SSE2 to match the selected cputype -- no manual
+    -d flags needed.
+  * Faster integer multiply by 2^n +/- 1 (peephole now lowers
+    these to lea/shl + add/sub).
+
+RTL (i386 / go32v2)
+  * MMX FillChar / FillWord / FillDWord / FillQWord variants,
+    auto-dispatched on MMX-capable CPUs without SSE2.
+  * Move: startup probe detects broken 64-bit-precision emulator
+    FPUs (em-dosbox, 86Box default) and falls back to a plain
+    rep-movsl path that avoids x87 entirely.
+  * Text-mode cursor scales to the actual VGA font height
+    (16 scan lines in 80x25) instead of a hardcoded 7.
