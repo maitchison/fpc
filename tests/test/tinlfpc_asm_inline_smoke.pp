@@ -1,4 +1,4 @@
-{ %OPT=-OoINLINESITEBUDGET=1000 -Si }
+{ %OPT=-OoINLINESITEBUDGET=1000 -OoASMINLINE -Si }
 { %RESULT=0 }
 {
   Smoke test: a valid `assembler; nostackframe; register; inline;` proc

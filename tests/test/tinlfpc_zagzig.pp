@@ -1,4 +1,4 @@
-{ %OPT=-O3 -OoINLINESITEBUDGET=1000 -CpPENTIUMMMX -OpPENTIUMMMX -Si }
+{ %OPT=-O3 -OoINLINESITEBUDGET=1000 -OoASMINLINE -CpPENTIUMMMX -OpPENTIUMMMX -Si }
 { %RESULT=0 }
 {
   Regression: dev/shared/uUtils.pas zagZig is `function zagZig(y: dword):

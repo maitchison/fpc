@@ -5,6 +5,22 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24n / Compiler 3.3.6n ==
+
+  Changes:
+    * `assembler; nostackframe; inline;` procs no longer auto-inline; opt
+      in with `-OoASMINLINE` or via Options | Compiler | Optimizations |
+      "Enable assembler inline". `-OoNOASMINLINE` stays parseable as a
+      no-op for back-compat.
+    * Options | Compiler | Optimizations checkboxes now read as positive
+      labels ("SCC inline-first", "Enable assembler inline", "PMMX asm
+      scheduler"), replacing the mixed-polarity old set; the cfg flags
+      emitted on save are unchanged so existing fp.cfg files round-trip.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24m / Compiler 3.3.6m ==
 
   * `param: T specialize [...]' now accepts enum-typed parameters.

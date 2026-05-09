@@ -521,11 +521,13 @@ interface
        );
 
        { switches being applied to all CPUs at the given level.
-         cs_opt_scc_inline_first and cs_opt_asm_inline are in level1
-         so any -O1+ build gets the SCC inline-deferral fix and the
-         asm-inline pipeline; -O- (level0) drops them. The init_settings
-         default in globals.pas keeps both ON at -O- as well. }
-       genericlevel1optimizerswitches = [cs_opt_level1,cs_opt_peephole,cs_opt_scc_inline_first,cs_opt_asm_inline];
+         cs_opt_scc_inline_first is in level1 so any -O1+ build gets
+         the SCC inline-deferral fix; -O- (level0) drops it. The
+         init_settings default in globals.pas keeps it ON at -O- as
+         well. cs_opt_asm_inline is NOT in level1 -- the asm-inline
+         splice/codegen path is still experimental, so -O1+ does not
+         silently enable it. Pass -OoASMINLINE to opt in. }
+       genericlevel1optimizerswitches = [cs_opt_level1,cs_opt_peephole,cs_opt_scc_inline_first];
        genericlevel2optimizerswitches = [cs_opt_level2,cs_opt_remove_empty_proc,cs_opt_unused_para];
        genericlevel3optimizerswitches = [cs_opt_level3,cs_opt_constant_propagate,cs_opt_nodedfa,cs_opt_loopstrength
                                          {$ifndef llvm},cs_opt_use_load_modify_store{$endif},

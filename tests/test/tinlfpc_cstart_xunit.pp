@@ -1,4 +1,4 @@
-{ %OPT=-OoINLINESITEBUDGET=1000 -Si -O3 -CpPENTIUMMMX -OpPENTIUMMMX }
+{ %OPT=-OoINLINESITEBUDGET=1000 -OoASMINLINE -Si -O3 -CpPENTIUMMMX -OpPENTIUMMMX }
 { %RESULT=0 }
 {
   Cross-unit asm-inline regression. cStart-style RDTSC helper declared

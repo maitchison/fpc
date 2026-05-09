@@ -1,4 +1,4 @@
-{ %OPT=-O3 -OoINLINESITEBUDGET=1000 -Si -CpPENTIUMMMX -OpPENTIUMMMX }
+{ %OPT=-O3 -OoINLINESITEBUDGET=1000 -OoASMINLINE -Si -CpPENTIUMMMX -OpPENTIUMMMX }
 { %RESULT=0 }
 {
   Cross-unit version of tinlfpc_asm_inline_dfa. Imports inline-asm

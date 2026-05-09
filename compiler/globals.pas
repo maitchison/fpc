@@ -553,12 +553,14 @@ Const
           it is a correctness mode for cross-unit inline expansion
           under the new ctask scheduler, not a code-quality knob. -O-
           (or explicit -OoNOSCCINLINEFIRST) drops it.
-          cs_opt_asm_inline likewise defaults ON regardless of level:
-          asm-inline only fires for procs explicitly marked
-          `assembler; nostackframe; inline;`, so cost when nothing
-          opts in is zero. -OoNOASMINLINE is the escape hatch when a
-          body trips the still-experimental splice/codegen path. }
-        optimizerswitches : [cs_opt_scc_inline_first,cs_opt_asm_inline];
+          cs_opt_asm_inline defaults OFF -- the splice/codegen path
+          is still experimental and a body that trips a rough edge
+          surfaces as a spurious IE (2012082101 ncgbas, 200309201
+          psub). Builds that want it pass -OoASMINLINE explicitly;
+          the tinlfpc_asm_inline_* tests do, the IDE has a checkbox
+          for it. -OoNOASMINLINE remains parseable as a no-op for
+          back-compat with cfgs written before the flip. }
+        optimizerswitches : [cs_opt_scc_inline_first];
         genwpoptimizerswitches : [];
         dowpoptimizerswitches : [];
 {$ifdef i8086}
