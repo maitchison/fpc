@@ -181,8 +181,8 @@ implementation
               { Asm-only inline pipeline is shelved -- known cross-unit splice
                 and codegen bugs surface as occasional miscompiles
                 (e.g. open-array length descriptor corruption). Refuse to
-                turn the bit on from any source: cmdline, fp.cfg, or a
-                {$OPTIMIZATION ASMINLINE} pragma. -OoNOASMINLINE / pragma
+                turn the bit on from any source: cmdline, fp.cfg, or an
+                $OPTIMIZATION ASMINLINE pragma. -OoNOASMINLINE / pragma
                 "noasminline" still parse (they exclude a bit that's already
                 clear), so old configs keep building -- only enabling errors. }
               if (opt=cs_opt_asm_inline) and doset then

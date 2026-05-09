@@ -317,7 +317,7 @@ implementation
         result:=false;
         reason:='';
         { Master toggle. SHELVED -- the bit is unsettable in normal
-          builds (dirparse hard-errors on -OoASMINLINE / pragma).
+          builds, dirparse hard-errors on -OoASMINLINE / pragma.
           Belt-and-suspenders check: if some future path manages to
           set the bit anyway, we still reject every candidate so
           callers fall back to a normal CALL. }

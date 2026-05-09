@@ -393,7 +393,7 @@ interface
          cs_opt_scc_inline_first,
          { Asm-only inline pipeline. SHELVED -- default OFF, and dirparse
            hard-errors if anything tries to enable the bit (cmdline,
-           fp.cfg, or {$OPTIMIZATION ASMINLINE} pragma). Known cross-unit
+           fp.cfg, or an $OPTIMIZATION ASMINLINE pragma). Known cross-unit
            splice / codegen bugs surface as occasional miscompiles
            (e.g. open-array length descriptor corruption, IE 2012082101
            in ncgbas, IE 200309201 in psub). The bit + option name are
