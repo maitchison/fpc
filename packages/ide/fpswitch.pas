@@ -288,11 +288,6 @@ const
         SCC inline-first correctness pass. Wired via AddInverseBooleanItem. }
       opt_scc_inline_first = 'SCC ~i~nline-first';
       { positive label: unticked at default (compiler default OFF);
-        ticking emits -OoASMINLINE and enables the assembler-only inline
-        pipeline (still experimental -- splice/codegen bugs surface as
-        spurious internal errors, hence opt-in). }
-      opt_asm_inline = 'Enable a~s~sembler inline';
-      { positive label: unticked at default (compiler default OFF);
         ticking emits -OoSCHEDULE and enables the PMMX U/V pair-aware
         asm reorderer. Effective on -OpPENTIUM/PENTIUMMMX targets;
         no-op elsewhere. }
@@ -1349,10 +1344,9 @@ begin
        genericlevel1optimizerswitches and defaults ON; positive
        checkbox pre-ticked. Unticking emits -OoNOSCCINLINEFIRST. }
      AddInverseBooleanItem(opt_scc_inline_first,'oNOSCCINLINEFIRST',idNone);
-     { cs_opt_asm_inline defaults OFF -- positive checkbox; ticking
-       emits -OoASMINLINE so `assembler; nostackframe; inline;` procs
-       are spliced into the caller instead of left as a normal CALL. }
-     AddBooleanItem(opt_asm_inline,'oASMINLINE',idNone);
+     { Asm-only inline pipeline (cs_opt_asm_inline) is shelved as
+       unstable -- no IDE checkbox. The compiler hard-errors if the
+       option is set from any source (cmdline, fp.cfg, pragma). }
      { cs_opt_scheduler defaults OFF; positive checkbox. Ticking
        emits -OoSCHEDULE so the i386 PMMX U/V pair reorderer runs.
        Only effective on -OpPENTIUM[MMX] targets (early-exits otherwise). }

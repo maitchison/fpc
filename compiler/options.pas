@@ -524,6 +524,9 @@ const
     SplitLine (OrigString, OptListPlaceholder, HS3);
     for opt:=low(toptimizerswitch) to high(toptimizerswitch) do
      begin
+      { ASMINLINE remains parseable but is shelved; suppress from -i/-io. }
+      if opt=cs_opt_asm_inline then
+        continue;
       if opt in supported_optimizerswitches then
        begin
         hs1:=OptimizerSwitchStr[opt];
@@ -563,7 +566,7 @@ const
   begin
     WriteLn(xmloutput,'    <optimizations>');
     for opt:=low(toptimizerswitch) to high(toptimizerswitch) do
-      if OptimizerSwitchStr[opt]<>'' then
+      if (opt<>cs_opt_asm_inline) and (OptimizerSwitchStr[opt]<>'') then
         WriteLn(xmloutput,'      <optimization name="',OptimizerSwitchStr[opt],'"/>');
     for n:=low(OptimizerNumericSwitchStr) to high(OptimizerNumericSwitchStr) do
       WriteLn(xmloutput,'      <optimization name="',OptimizerNumericSwitchStr[n].name,
