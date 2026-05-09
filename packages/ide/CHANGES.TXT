@@ -5,6 +5,50 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24q / Compiler 3.3.6q ==
+
+  New features:
+    * Named arguments at call sites (off by default; opt-in). Use
+      `name := value' inside an argument list to pick a parameter by
+      name; positional and named arguments may mix freely so long as
+      every positional argument appears before the first named one.
+      Names match parameters case-insensitively (Pascal identifier
+      rules) and can fill any slot, including ones the caller would
+      otherwise have to skip with a sentinel placeholder:
+
+          procedure run(target: string;
+                        retries: longint = 3;
+                        verbose: boolean = false);
+          ...
+
+          // positional + named, default `retries' kept:
+          run('host', verbose := true);
+
+          // all-named, declaration order ignored:
+          run(verbose := true, target := 'host');
+
+          // mixing positional and several named, in any name order:
+          run('host', verbose := true, retries := 5);
+
+      Enable per build with `-OoNAMEDARGS' on the compiler command
+      line, or tick "Named arguments" under Options | Compiler |
+      Optimizations in the IDE. Without the switch, `:=' inside an
+      argument list parses as the existing language-level statement
+      (an error in expression position), so existing code is
+      unaffected.
+
+      Errors are reported up-front: an unknown name (no parameter by
+      that label), a slot filled twice, or a positional argument after
+      a named one all stop the call before codegen. Mixing named
+      arguments with `varargs' is rejected -- there are no formal
+      names for the variadic tail. Variant-dispatch (COM Automation)
+      calls keep their existing runtime-dispatch behaviour and are
+      unaffected.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24p / Compiler 3.3.6p ==
 
   Fixes:

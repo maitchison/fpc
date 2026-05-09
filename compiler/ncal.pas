@@ -283,9 +283,10 @@ interface
 
           property paravalue : tnode read left write left;
           property nextpara : tnode read right write right;
-          { third is reused to store the parameter name (only while parsing
-            vardispatch calls, never in real node tree) and copy of 'high'
-            parameter tree when the parameter is an open array of managed type }
+          { third is reused to store the parameter name -- set by parse_paras
+            for `name := value` syntax, consumed by tcallnode.pass_typecheck
+            (normal calls; cleared after slot binding) and translate_disp_call
+            (variant dispatch). Not present in any post-typecheck node tree. }
           property parametername : tnode read third write third;
 
           { returns whether the evaluation of this parameter involves a
@@ -316,6 +317,21 @@ interface
     function reverseparameters(var p: tcallparanode) : sizeint;
     function translate_disp_call(selfnode,parametersnode: tnode; calltype: tdispcalltype; const methodname : ansistring;
       dispid : longint;resultdef : tdef) : tnode;
+
+    type
+      tcallparaarr = array of tcallparanode;
+
+    { Named-argument support: bind each tcallparanode in `left` to a pd.paras[]
+      slot. Positional pt's fill leftmost slots in source order; pt's whose
+      `parametername` is set match by name (case-insensitive). slot_map[paraidx]
+      receives the bound pt, or stays nil when the slot is unfilled (caller
+      must fill with the default-value if any). On failure returns false with
+      errmsg set to a parser_e_* msgnumber and errparam pointing at the
+      offending pt (nil for whole-call errors). }
+    function try_bind_named_paras(left: tnode; pd: tabstractprocdef;
+                                  out slot_map: tcallparaarr;
+                                  out errmsg: longint;
+                                  out errparam: tnode): boolean;
 
     var
       ccallnode : tcallnodeclass = tcallnode;
@@ -415,6 +431,127 @@ implementation
              inc(result);
           end;
         p:=hp1;
+      end;
+
+
+    function try_bind_named_paras(left: tnode; pd: tabstractprocdef;
+                                  out slot_map: tcallparaarr;
+                                  out errmsg: longint;
+                                  out errparam: tnode): boolean;
+      var
+        pt   : tcallparanode;
+        i, n_pos, pos_idx, vis_count, found : longint;
+        para : tparavarsym;
+        pname: TSymStr;
+        vis_arr : array of longint;
+      begin
+        result:=false;
+        errmsg:=0;
+        errparam:=nil;
+        setlength(slot_map,pd.paras.count);
+        for i:=0 to high(slot_map) do
+          slot_map[i]:=nil;
+
+        { build visible (= non-hidden) param-index array }
+        vis_count:=0;
+        for i:=0 to pd.paras.count-1 do
+          if not(vo_is_hidden_para in tparavarsym(pd.paras[i]).varoptions) then
+            inc(vis_count);
+        setlength(vis_arr,vis_count);
+        vis_count:=0;
+        for i:=0 to pd.paras.count-1 do
+          if not(vo_is_hidden_para in tparavarsym(pd.paras[i]).varoptions) then
+            begin
+              vis_arr[vis_count]:=i;
+              inc(vis_count);
+            end;
+
+        { count positional pt nodes (chain head = rightmost source-position arg) }
+        n_pos:=0;
+        pt:=tcallparanode(left);
+        while assigned(pt) do
+          begin
+            if not assigned(pt.parametername) then
+              inc(n_pos);
+            pt:=tcallparanode(pt.right);
+          end;
+
+        if n_pos>vis_count then
+          begin
+            errmsg:=parser_e_wrong_parameter_size;
+            exit;
+          end;
+
+        { walk chain head -> tail: named bind by name; positional bind in
+          descending visible-slot order so that the leftmost (= last in chain)
+          positional ends up at slot vis_arr[0]. }
+        pos_idx:=n_pos-1;
+        pt:=tcallparanode(left);
+        while assigned(pt) do
+          begin
+            if assigned(pt.parametername) then
+              begin
+                if pt.parametername.nodetype<>stringconstn then
+                  internalerror(2026050901);
+                pname:=upper(strpas(tstringconstnode(pt.parametername).asconstpchar));
+                found:=-1;
+                for i:=0 to vis_count-1 do
+                  begin
+                    para:=tparavarsym(pd.paras[vis_arr[i]]);
+                    if para.Name=pname then
+                      begin
+                        found:=vis_arr[i];
+                        break;
+                      end;
+                  end;
+                if found<0 then
+                  begin
+                    errmsg:=parser_e_unknown_named_arg;
+                    errparam:=pt;
+                    exit;
+                  end;
+                if assigned(slot_map[found]) then
+                  begin
+                    errmsg:=parser_e_named_arg_already_specified;
+                    errparam:=pt;
+                    exit;
+                  end;
+                slot_map[found]:=pt;
+              end
+            else
+              begin
+                if (pos_idx<0) or (pos_idx>=vis_count) then
+                  begin
+                    errmsg:=parser_e_wrong_parameter_size;
+                    errparam:=pt;
+                    exit;
+                  end;
+                if assigned(slot_map[vis_arr[pos_idx]]) then
+                  begin
+                    errmsg:=parser_e_named_arg_already_specified;
+                    errparam:=pt;
+                    exit;
+                  end;
+                slot_map[vis_arr[pos_idx]]:=pt;
+                dec(pos_idx);
+              end;
+            pt:=tcallparanode(pt.right);
+          end;
+
+        { every required (no-default) visible slot must be filled }
+        for i:=0 to vis_count-1 do
+          if not assigned(slot_map[vis_arr[i]]) then
+            begin
+              para:=tparavarsym(pd.paras[vis_arr[i]]);
+              if not assigned(para.defaultconstsym) then
+                begin
+                  errmsg:=parser_e_wrong_parameter_size;
+                  errparam:=nil;
+                  exit;
+                end;
+            end;
+
+        result:=true;
       end;
 
     function translate_disp_call(selfnode,parametersnode: tnode; calltype: tdispcalltype; const methodname : ansistring;
@@ -4090,6 +4227,12 @@ implementation
         converted_result_data : ttempcreatenode;
         calltype: tdispcalltype;
         invokesym : tsym;
+        { named-arg post-resolution rebuild state }
+        named_slot_map : tcallparaarr;
+        named_errmsg : longint;
+        named_errparam : tnode;
+        new_left : tnode;
+        has_named_post : boolean;
       begin
         result:=nil;
 
@@ -4386,6 +4529,55 @@ implementation
                  assigned(tprocdef(tprocdef(procdefinition).genericdef).procsym) and
                  (tprocdef(tprocdef(procdefinition).genericdef).procsym.refs=0) then
                addsymref(tprocdef(tprocdef(procdefinition).genericdef).procsym);
+           end;
+
+         { Named-arg post-resolution: rebuild left chain in paraidx-descending
+           order, filling default-valued slots that the call left unspecified.
+           After this, the chain matches the procdef's positional layout, so
+           downstream codegen and the legacy default-fill block below see a
+           normal chain. parametername fields are stripped (no longer needed). }
+         has_named_post:=false;
+         pt:=tcallparanode(left);
+         while assigned(pt) do
+           begin
+             if assigned(pt.parametername) then
+               begin
+                 has_named_post:=true;
+                 break;
+               end;
+             pt:=tcallparanode(pt.right);
+           end;
+         if has_named_post then
+           begin
+             if not try_bind_named_paras(left,procdefinition,named_slot_map,named_errmsg,named_errparam) then
+               internalerror(2026050902);
+             new_left:=nil;
+             for i:=0 to high(named_slot_map) do
+               begin
+                 if vo_is_hidden_para in tparavarsym(procdefinition.paras[i]).varoptions then
+                   continue;
+                 if assigned(named_slot_map[i]) then
+                   begin
+                     if assigned(named_slot_map[i].parametername) then
+                       begin
+                         named_slot_map[i].parametername.free;
+                         named_slot_map[i].parametername:=nil;
+                       end;
+                     named_slot_map[i].right:=new_left;
+                     new_left:=named_slot_map[i];
+                   end
+                 else
+                   begin
+                     if not assigned(tparavarsym(procdefinition.paras[i]).defaultconstsym) then
+                       internalerror(2026050903);
+                     new_left:=ccallparanode.create(genconstsymtree(
+                       tconstsym(tparavarsym(procdefinition.paras[i]).defaultconstsym)),new_left);
+                     tcallparanode(new_left).callnode:=self;
+                   end;
+               end;
+             left:=new_left;
+             { mark fully filled so the legacy default-fill block below no-ops }
+             paralength:=procdefinition.maxparacount;
            end;
 
          { add needed default parameters }

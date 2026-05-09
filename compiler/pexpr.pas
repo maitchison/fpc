@@ -51,7 +51,14 @@ interface
 
     procedure string_dec(var def: tdef; allowtypedef: boolean);
 
-    function parse_paras(__colon,__namedpara : boolean;end_of_paras : ttoken) : tnode;
+    { __colon: allow `arg : width [ : decimals ]` colon-paras (Write/Str-style).
+      __allow_empty_paras: allow empty arg between commas (vardispatch only).
+      __allow_named: allow `name := value` named arguments. Mutually
+      compatible with __allow_empty_paras (vardispatch wants both); the
+      named-args parsing path is taken whenever either flag is set. When
+      __allow_named is set, positional-first ordering is enforced: once
+      a named arg appears, all subsequent args must also be named. }
+    function parse_paras(__colon,__allow_empty_paras,__allow_named : boolean;end_of_paras : ttoken) : tnode;
 
     { the ID token has to be consumed before calling this function }
     procedure do_member_read(structh:tabstractrecorddef;getaddr:boolean;sym:tsym;var p1:tnode;var again:boolean;callflags:tcallnodeflags;spezcontext:tspecializationcontext);
@@ -158,11 +165,14 @@ implementation
        end;
 
 
-    function parse_paras(__colon,__namedpara : boolean;end_of_paras : ttoken) : tnode;
+    function parse_paras(__colon,__allow_empty_paras,__allow_named : boolean;end_of_paras : ttoken) : tnode;
       var
          p1,p2,argname : tnode;
          prev_in_args,
-         old_named_args_allowed : boolean;
+         old_named_args_allowed,
+         allow_name_recognition,
+         effective_allow_named,
+         seen_named : boolean;
       begin
          if current_scanner.token=end_of_paras then
            begin
@@ -175,31 +185,42 @@ implementation
          { set para parsing values }
          in_args:=true;
          named_args_allowed:=false;
+         { Gate the named-arg path: caller-side opt-in plus the
+           cs_opt_named_args optimizer switch (default off; -OoNAMEDARGS or
+           IDE checkbox to enable). __allow_empty_paras (vardispatch) keeps
+           its existing recognition path regardless -- COM dispatch already
+           shipped with name-bearing args. }
+         effective_allow_named:=__allow_named and
+           (cs_opt_named_args in current_settings.optimizerswitches);
+         allow_name_recognition:=__allow_empty_paras or effective_allow_named;
+         seen_named:=false;
          p2:=nil;
          repeat
-           if __namedpara then
+           if __allow_empty_paras and (current_scanner.token=_COMMA) then
              begin
-               if current_scanner.token=_COMMA then
+               { empty parameter }
+               p2:=ccallparanode.create(cnothingnode.create,p2);
+             end
+           else if allow_name_recognition then
+             begin
+               named_args_allowed:=true;
+               p1:=comp_expr([ef_accept_equal]);
+               named_args_allowed:=false;
+               if found_arg_name then
                  begin
-                   { empty parameter }
-                   p2:=ccallparanode.create(cnothingnode.create,p2);
+                   argname:=p1;
+                   p1:=comp_expr([ef_accept_equal]);
+                   p2:=ccallparanode.create(p1,p2);
+                   tcallparanode(p2).parametername:=argname;
+                   seen_named:=true;
                  end
                else
                  begin
-                   named_args_allowed:=true;
-                   p1:=comp_expr([ef_accept_equal]);
-                   named_args_allowed:=false;
-                   if found_arg_name then
-                     begin
-                       argname:=p1;
-                       p1:=comp_expr([ef_accept_equal]);
-                       p2:=ccallparanode.create(p1,p2);
-                       tcallparanode(p2).parametername:=argname;
-                     end
-                   else
-                     p2:=ccallparanode.create(p1,p2);
-                   found_arg_name:=false;
+                   if effective_allow_named and seen_named then
+                     Message(parser_e_positional_after_named);
+                   p2:=ccallparanode.create(p1,p2);
                  end;
+               found_arg_name:=false;
              end
            else
              begin
@@ -770,7 +791,7 @@ implementation
             begin
               if try_to_consume(_LKLAMMER) then
                begin
-                 paras:=parse_paras(false,false,_RKLAMMER);
+                 paras:=parse_paras(false,false,false,_RKLAMMER);
                  consume(_RKLAMMER);
                end
               else
@@ -819,7 +840,7 @@ implementation
             begin
               if try_to_consume(_LKLAMMER) then
                begin
-                 paras:=parse_paras(true,false,_RKLAMMER);
+                 paras:=parse_paras(true,false,false,_RKLAMMER);
                  consume(_RKLAMMER);
                end
               else
@@ -831,7 +852,7 @@ implementation
           in_str_x_string :
             begin
               consume(_LKLAMMER);
-              paras:=parse_paras(true,false,_RKLAMMER);
+              paras:=parse_paras(true,false,false,_RKLAMMER);
               consume(_RKLAMMER);
               p1 := geninlinenode(l,false,paras);
               statement_syssym := p1;
@@ -1203,7 +1224,7 @@ implementation
               begin
                 if try_to_consume(_LKLAMMER) then
                  begin
-                   para:=parse_paras(false,false,_RKLAMMER);
+                   para:=parse_paras(false,false,true,_RKLAMMER);
                    consume(_RKLAMMER);
                  end;
               end;
@@ -1326,7 +1347,7 @@ implementation
            begin
              if try_to_consume(_LECKKLAMMER) then
                begin
-                 paras:=parse_paras(false,false,_RECKKLAMMER);
+                 paras:=parse_paras(false,false,false,_RECKKLAMMER);
                  consume(_RECKKLAMMER);
                end;
            end;
@@ -2735,12 +2756,12 @@ implementation
                               calltype:=dct_method;
                               if try_to_consume(_LKLAMMER) then
                                 begin
-                                  p2:=parse_paras(false,true,_RKLAMMER);
+                                  p2:=parse_paras(false,true,true,_RKLAMMER);
                                   consume(_RKLAMMER);
                                 end
                               else if try_to_consume(_LECKKLAMMER) then
                                 begin
-                                  p2:=parse_paras(false,true,_RECKKLAMMER);
+                                  p2:=parse_paras(false,true,true,_RECKKLAMMER);
                                   consume(_RECKKLAMMER);
                                   calltype:=dct_propget;
                                 end
@@ -2977,7 +2998,7 @@ implementation
                     begin
                       if try_to_consume(_LKLAMMER) then
                         begin
-                          p2:=parse_paras(false,false,_RKLAMMER);
+                          p2:=parse_paras(false,false,true,_RKLAMMER);
                           consume(_RKLAMMER);
                           p1:=ccallnode.create_procvar(p2,p1);
                           { proc():= is never possible }
@@ -3146,7 +3167,7 @@ implementation
                              result:=cerrornode.create;
                              if try_to_consume(_LKLAMMER) then
                               begin
-                                parse_paras(false,false,_RKLAMMER);
+                                parse_paras(false,false,false,_RKLAMMER);
                                 consume(_RKLAMMER);
                               end;
                            end
@@ -3313,7 +3334,7 @@ implementation
               result:=cerrornode.create;
               if try_to_consume(_LKLAMMER) then
                begin
-                 parse_paras(false,false,_RKLAMMER);
+                 parse_paras(false,false,false,_RKLAMMER);
                  consume(_RKLAMMER);
                end;
             end;
@@ -3448,19 +3469,28 @@ implementation
                    tokenpos:=current_filepos;
                    consume(t);
                  end;
-               { named parameter support }
+               { Named parameter support: only the FIRST identifier of the
+                 outer arg-list expression can become a named-arg name. We
+                 clear named_args_allowed unconditionally on the first time
+                 factor() reaches this point so that nested expressions
+                 (assignment statements inside an anonymous function body,
+                 array indices, etc.) do not accidentally consume `IDENT :=`
+                 as a named-arg. parse_paras re-arms it for the next arg. }
                found_arg_name:=false;
 
-               if not(unit_found) and
-                   not isspecialize and
-                  named_args_allowed and
-                  (current_scanner.token=_ASSIGNMENT) then
-                  begin
-                    found_arg_name:=true;
-                    p1:=cstringconstnode.createstr(orgstoredpattern);
-                    consume(_ASSIGNMENT);
-                    exit;
-                  end;
+               if named_args_allowed then
+                 begin
+                   named_args_allowed:=false;
+                   if not(unit_found) and
+                       not isspecialize and
+                      (current_scanner.token=_ASSIGNMENT) then
+                      begin
+                        found_arg_name:=true;
+                        p1:=cstringconstnode.createstr(orgstoredpattern);
+                        consume(_ASSIGNMENT);
+                        exit;
+                      end;
+                 end;
 
                if isspecialize then
                  begin
@@ -3744,6 +3774,7 @@ implementation
          nodechanged  : boolean;
          oldprocvardef : tprocvardef;
          oldfuncrefdef : tobjectdef;
+         old_named_args_allowed : boolean;
       begin
         { can't keep a copy of p1 and compare pointers afterwards, because
           p1 may be freed and reallocated in the same place!  }
@@ -4364,7 +4395,14 @@ implementation
                      oldfuncrefdef:=getfuncrefdef;
                      getprocvardef:=nil;
                      getfuncrefdef:=nil;
+                     { isolate named_args_allowed: the body of an anonymous
+                       function contains its own statements + assignments, and
+                       we don't want the outer arg-list's `name :=` recognition
+                       to fire on `Result := ...` etc. inside the body. }
+                     old_named_args_allowed:=named_args_allowed;
+                     named_args_allowed:=false;
                      pd:=read_proc([rpf_anonymous],nil);
+                     named_args_allowed:=old_named_args_allowed;
                      getprocvardef:=oldprocvardef;
                      getfuncrefdef:=oldfuncrefdef;
                      { assume that we try to get the address except if certain

@@ -398,7 +398,16 @@ interface
            still-experimental cross-unit asm-inline path: if a body
            tickles a splice/codegen bug, flip this off to fall back to
            pre-asm-inline behaviour without rebuilding the compiler. }
-         cs_opt_asm_inline
+         cs_opt_asm_inline,
+         { Compile-time named arguments at call sites: `f(x, name := value)`.
+           Default OFF -- a language-level extension, opt-in via -OoNAMEDARGS
+           or the IDE checkbox. With it off, `:=` inside a call-arg list
+           parses as today (always rejected, since `:=` is a statement,
+           not an expression). With it on, `IDENT := expr` in arg position
+           is consumed as a named-arg name+value pair; positional args must
+           precede the first named one. See packages/ide/CHANGES.TXT 3.3.6o
+           for the user-visible spec. }
+         cs_opt_named_args
        );
        toptimizerswitches = set of toptimizerswitch;
 
@@ -479,7 +488,8 @@ interface
          'DEADSTORE','FORCENOSTACKFRAME','USELOADMODIFYSTORE',
          'UNUSEDPARA','CONSTS','FORLOOP',
          'SCCINLINEFIRST',
-         'ASMINLINE'
+         'ASMINLINE',
+         'NAMEDARGS'
        );
 
        { Numeric -OoKEY=N knobs (parsed by dirparse.UpdateOptimizerStr).
