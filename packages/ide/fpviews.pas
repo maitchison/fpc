@@ -52,9 +52,12 @@ type
 
     PFPHeapView = ^TFPHeapView;
     TFPHeapView = object(THeapView)
+      LastIDESizeKB, LastDpmiKB: longint;
       constructor Init(var Bounds: TRect);
       constructor InitKb(var Bounds: TRect);
       procedure   HandleEvent(var Event: TEvent); virtual;
+      procedure   Update;
+      procedure   Draw; virtual;
       function    GetPalette: PPalette; virtual;
     end;
 
@@ -583,7 +586,8 @@ uses
   {$ifdef S3PROBE}S3Modes,{$endif}
   FPSymbol,FPDebug,FPVars,FPUtils,FPCompil,FPHelp,
   FPTools,FPIDE,FPCodTmp,FPCodCmp,
-  FPDefIdx,FPNavStk,FPPeek,FPDeclImpl;
+  FPDefIdx,FPNavStk,FPPeek,FPDeclImpl,
+  FPHeap;
 
 const
   RSourceEditor: TStreamRec = (
@@ -2650,6 +2654,7 @@ begin
   Options:=Options or gfGrowHiX or gfGrowHiY;
   EventMask:=EventMask or evIdle;
   GrowMode:=gfGrowAll;
+  LastIDESizeKB:=-1; LastDpmiKB:=-1;
 end;
 
 constructor TFPHeapView.InitKb(var Bounds: TRect);
@@ -2658,6 +2663,7 @@ begin
   Options:=Options or gfGrowHiX or gfGrowHiY;
   EventMask:=EventMask or evIdle;
   GrowMode:=gfGrowAll;
+  LastIDESizeKB:=-1; LastDpmiKB:=-1;
 end;
 
 procedure TFPHeapView.HandleEvent(var Event: TEvent);
@@ -2667,6 +2673,54 @@ begin
       Update;
   end;
   inherited HandleEvent(Event);
+end;
+
+procedure TFPHeapView.Update;
+{ Detailed mode polls both IDE manager-allocated size and DPMI largest-free.
+  Falls back to base behaviour when dpHeapDetail is off. }
+var
+  info: THeapInfo;
+  curIDE, curDpmi: longint;
+begin
+  if (DesktopPreferences and dpHeapDetail) = 0 then
+  begin
+    inherited Update;
+    Exit;
+  end;
+  GatherHeapInfo(info);
+  curIDE  := info.FPC.CurrHeapSize shr 10;
+  if info.HasDpmi and (info.DpmiLargestK >= 0) then
+    curDpmi := info.DpmiLargestK
+  else
+    curDpmi := -1;
+  if (curIDE <> LastIDESizeKB) or (curDpmi <> LastDpmiKB) then
+  begin
+    LastIDESizeKB := curIDE;
+    LastDpmiKB    := curDpmi;
+    DrawView;
+  end;
+end;
+
+procedure TFPHeapView.Draw;
+var
+  S: string;
+  C: Byte;
+  B: TDrawBuffer;
+  info: THeapInfo;
+begin
+  if (DesktopPreferences and dpHeapDetail) = 0 then
+  begin
+    inherited Draw;
+    Exit;
+  end;
+  GatherHeapInfo(info);
+  S := FormatHeapShort(info, Size.X);
+  while length(S) < Size.X do
+    S := ' ' + S;                   { right-justify like the legacy widget }
+  C := GetColor(2);
+  MoveChar(B, ' ', C, Size.X);
+  MoveStr(B, S, C);
+  WriteLine(0, 0, Size.X, 1, B);
 end;
 
 function TFPHeapView.GetPalette: PPalette;

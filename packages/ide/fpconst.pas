@@ -23,7 +23,7 @@ uses Views,App,
      WViews,WEditor,WHTMLHlp;
 
 const
-     VersionStr           = '1.0.24q';  { ships with Compiler 3.3.6q }
+     VersionStr           = '1.0.24r';  { ships with Compiler 3.3.6r }
 
 {$ifdef HAS_REVINC}
      BuildCommitStr       = '-'+{$i ide_revision.inc};
@@ -164,6 +164,7 @@ const
      { Desktop Option constants }
      dpClockView          = $00000001;
      dpHeapMonitor        = $00000002;
+     dpHeapDetail         = $00000004;  { extended status-line "IDE/DPMI" form }
 
      { Desktop Location constants }
      dlCurrentDir         = $00;
@@ -317,6 +318,8 @@ const
      cmAbout             = 2106;
      cmHelpDebug         = 2107;
      cmWhatsNew          = 2108;
+     cmHeapStatus        = 2109;
+     cmHeapDump          = 2110;
 
      cmEditorOptions     = 2202;
      cmBrowserOptions    = 2203;
@@ -416,6 +419,8 @@ const
      hcCodeTemplateOptions=hcShift+cmCodeTemplateOptions;
      hcAbout             = hcShift+cmAbout;
      hcWhatsNew          = hcShift+cmWhatsNew;
+     hcHeapStatus        = hcShift+cmHeapStatus;
+     hcHeapDump          = hcShift+cmHeapDump;
      hcCompilerMessages  = hcShift+cmCompilerMessages;
      hcOpenByName        = hcShift+cmOpenByName;
 

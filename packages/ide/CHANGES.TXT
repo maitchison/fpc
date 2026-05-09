@@ -5,6 +5,33 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24r / Compiler 3.3.6r ==
+
+  New features:
+    * Heap status... dialog (Help | Heap status...) showing the IDE's
+      true DPMI footprint instead of just "current allocations". Reports
+      Currently-in-use, Manager-allocated (the real DPMI cost -- never
+      shrinks on go32v2), peak ever, held-but-idle, and the DPMI host's
+      free-block / physical totals. The "Largest free chunk" line is the
+      ceiling on any program spawned via F9 Run.
+
+    * Detailed heap-status widget. Tick "Detailed heap (IDE/DPMI)" under
+      Options | Preferences (in the Desktop group) to switch the
+      bottom-right indicator from currently-allocated bytes to
+      "I <ide-size>m D <dpmi-largest-free>m" -- the IDE's monotonic
+      footprint and the headroom DPMI will hand out on the next ask.
+      Off by default; existing behaviour preserved.
+
+    * Tools | Dump heap diagnostics... writes a fpheap.log next to fp.exe
+      with the full FPC heap status, all DPMI int 31h fn 0500h fields, and
+      brief interpretation hints. Useful for debugging F9-Run OOM:
+      compare the IDE's CurrHeapSize to the DPMI Largest-free-block to
+      see how much headroom is left for child programs.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24q / Compiler 3.3.6q ==
 
   New features:
