@@ -253,7 +253,11 @@ type
       of the def can not be determined }
     df_has_generic_fields,
     {  never use the typename for this type, always expand full definition }
-    df_llvm_no_typename
+    df_llvm_no_typename,
+    { record was declared as `managed record' -- opted into the managed-record
+      runtime so field defaults can synthesise a class operator Initialize.
+      Never set on classes/objects/interfaces. }
+    df_managed_record
   );
   tdefoptions=set of tdefoption;
 
@@ -520,7 +524,8 @@ type
     tsk_wasm_suspending_first, // WebAssembly suspending external wrapper, suspender object is first argument
     tsk_wasm_suspending_last,  // WebAssembly suspending external wrapper, suspender object is last argument
     tsk_wasm_promising,        // WebAssembly promising export wrapper
-    tsk_invoke_helper          // Method invoke helper, primarily used in WebAssembly.
+    tsk_invoke_helper,         // Method invoke helper, primarily used in WebAssembly.
+    tsk_record_field_defaults  // Initialize body synthesised from `field: T = expr' defaults
   );
 
   { synthetic procdef supplementary information (tprocdef.skpara) }

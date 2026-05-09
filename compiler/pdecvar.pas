@@ -1934,6 +1934,67 @@ implementation
                end;
                stringdispose(deprecatedmsg);
 
+             { Field default value: `field: T = expr' is accepted only inside a
+               `managed record'. The value is captured as text and consumed by
+               add_record_field_defaults_routine to synthesise a class operator
+               Initialize. v1 supports only single-value constants (integer,
+               real, char, boolean, enum, nil); strings and complex expressions
+               are rejected with parser_e_field_default_too_complex. }
+             if current_scanner.token=_EQ then
+               begin
+                 if not (vd_record in options) or
+                    not assigned(recst.defowner) or
+                    not (df_managed_record in tabstractrecorddef(recst.defowner).defoptions) then
+                   begin
+                     Message(parser_e_field_default_requires_managed_record);
+                     { error recovery: skip past the bad expression }
+                     consume(_EQ);
+                     while not (current_scanner.token in [_SEMICOLON,_END,_RKLAMMER]) do
+                       consume(current_scanner.token);
+                   end
+                 else if sc.count<>1 then
+                   begin
+                     Message(parser_e_initialized_only_one_var);
+                     consume(_EQ);
+                     while not (current_scanner.token in [_SEMICOLON,_END,_RKLAMMER]) do
+                       consume(current_scanner.token);
+                   end
+                 else if (hdef=generrordef) or not assigned(hdef.typesym) then
+                   begin
+                     Message(parser_e_field_default_too_complex);
+                     consume(_EQ);
+                     while not (current_scanner.token in [_SEMICOLON,_END,_RKLAMMER]) do
+                       consume(current_scanner.token);
+                   end
+                 else
+                   begin
+                     consume(_EQ);
+                     pt:=comp_expr([]);
+                     do_typecheckpass(pt);
+                     { coerce to the field's type so a literal like `1' becomes
+                       a properly-typed ordconstn (matters for boolean/char/enum) }
+                     inserttypeconv(pt,hdef);
+                     do_typecheckpass(pt);
+                     case pt.nodetype of
+                       ordconstn :
+                         tfieldvarsym(sc[0]).defaultvaltext :=
+                           stringdup(hdef.typesym.realname+'('+tostr(tordconstnode(pt).value)+')');
+                       niln :
+                         tfieldvarsym(sc[0]).defaultvaltext := stringdup('nil');
+                       realconstn :
+                         begin
+                           hs:='';
+                           str(trealconstnode(pt).value_real,hs);
+                           tfieldvarsym(sc[0]).defaultvaltext := stringdup(hs);
+                         end;
+                       else
+                         Message(parser_e_field_default_too_complex);
+                     end;
+                     pt.free;
+                     pt:=nil;
+                   end;
+               end;
+
              { Records and objects can't have default values }
              { for a record there doesn't need to be a ; before the END or )    }
              if not(current_scanner.token in [_END,_RKLAMMER]) and

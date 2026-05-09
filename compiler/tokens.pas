@@ -209,6 +209,7 @@ type
     _GENERIC,
     _IOCHECK,
     _LIBRARY,
+    _MANAGED,
     _MESSAGE,
     _MODULUS,
     _PACKAGE,
@@ -558,6 +559,7 @@ const
       (str:'GENERIC'       ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'IOCHECK'       ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'LIBRARY'       ;special:false;keyword:alllanguagemodes-[m_iso,m_extpas];op:NOTOKEN),
+      (str:'MANAGED'       ;special:false;keyword:[m_none];op:NOTOKEN), { contextual: managed record marker }
       (str:'MESSAGE'       ;special:false;keyword:[m_none];op:NOTOKEN),
       (str:'MODULUS'       ;special:false;keyword:[m_none];op:NOTOKEN), { delphi operator name }
       (str:'PACKAGE'       ;special:false;keyword:[m_none];op:NOTOKEN),

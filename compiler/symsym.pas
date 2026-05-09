@@ -240,6 +240,11 @@ interface
 {$else symansistr}
           cachedmangledname: pshortstring; { mangled name for ObjC or Java }
 {$endif symansistr}
+          { TRANSIENT: source-text representation of a `field: T = expr' default value
+            in a `managed record'. Set by read_record_fields, consumed and freed by
+            add_record_field_defaults_routine when synthesising class operator
+            Initialize. Never serialised to PPU; always nil after record completion. }
+          defaultvaltext : pshortstring;
           constructor create(const n : TSymStr;vsp:tvarspez;def:tdef;vopts:tvaroptions);virtual;
           constructor ppuload(ppufile:tcompilerppufile);
           { do not override this routine in platform-specific subclasses,
@@ -2150,6 +2155,7 @@ implementation
         stringdispose(cachedmangledname);
 {$endif symansistr}
         stringdispose(externalname);
+        stringdispose(defaultvaltext);
         inherited destroy;
       end;
 
