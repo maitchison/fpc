@@ -498,7 +498,7 @@ scan_e_improperly_indented_multiline_string=02120_E_Incorrectly indented multi-l
 #
 # Parser
 #
-# 03368 is the last used one
+# 03378 is the last used one
 #
 % \section{Parser messages}
 % This section lists all parser messages. The parser takes care of the
@@ -1729,6 +1729,18 @@ parser_e_field_default_too_complex=03377_E_Field default value must be a simple 
 % v1 of field defaults supports only literal constants (integers, hex literals, characters, strings, true/false, nil), optionally with a unary minus prefix on numerics.
 parser_e_field_default_conflicts_initialize=03378_E_Cannot combine field defaults with explicit "class operator Initialize"
 % A managed record either uses field defaults to drive the synthesised Initialize, or declares the operator explicitly. Mixing the two is not yet supported.
+parser_e_named_arg_not_allowed=03379_E_Named arguments are not allowed here
+% You used the \var{name := value} syntax in a context that does not accept
+% named arguments (e.g. a built-in such as \var{Write} or an indexed property).
+parser_e_positional_after_named=03380_E_Positional argument cannot follow a named argument
+% Once a named argument has been used in a call, every subsequent argument
+% must also be named: \var{f(1, b := 2, 3)} is rejected, write \var{f(1, b := 2, c := 3)}.
+parser_e_unknown_named_arg=03381_E_Procedure has no parameter named "$1"
+% A \var{name := value} argument refers to a parameter that the called
+% procedure does not declare. Check spelling and which overload you intended.
+parser_e_named_arg_already_specified=03382_E_Parameter "$1" has already been specified
+% The same parameter was filled twice -- either positionally and again by name,
+% or by two \var{name := value} arguments with the same name.
 %
 % \end{description}
 %

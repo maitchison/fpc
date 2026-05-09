@@ -2903,6 +2903,13 @@ implementation
         releasecurrpt, check_valid_var : boolean;
         cdoptions : tcompare_defs_options;
         n : tnode;
+        { named-arg state, used per-candidate when has_named_args }
+        has_named_args : boolean;
+        slot_map : tcallparaarr;
+        errmsg : longint;
+        errparam : tnode;
+        para_snapshot : array of tcallparanode;
+        snap_k : longint;
 
         function fp_precision_score(def: tdef): integer;
           begin
@@ -2914,20 +2921,111 @@ implementation
               result:=1;
           end;
 
+        procedure restore_chain_from_snapshot;
+          var
+            i : longint;
+          begin
+            if length(para_snapshot)=0 then
+              exit;
+            for i:=0 to high(para_snapshot)-1 do
+              para_snapshot[i].right:=para_snapshot[i+1];
+            para_snapshot[high(para_snapshot)].right:=nil;
+            FParaNode:=para_snapshot[0];
+          end;
+
       begin
         cdoptions:=[cdo_check_operator];
         if FAllowVariant then
           include(cdoptions,cdo_allow_variant);
+
+        { Detect named arguments once; chain shape is shared across all
+          candidates, but we must rebuild the chain in each candidate's
+          paraidx order since named args may map differently per overload. }
+        has_named_args:=false;
+        if assigned(FParaNode) then
+          begin
+            pt:=tcallparanode(FParaNode);
+            while assigned(pt) do
+              begin
+                if assigned(pt.parametername) then
+                  begin
+                    has_named_args:=true;
+                    break;
+                  end;
+                pt:=tcallparanode(pt.right);
+              end;
+          end;
+
+        if has_named_args then
+          begin
+            setlength(para_snapshot,FParaLength);
+            pt:=tcallparanode(FParaNode);
+            snap_k:=0;
+            while assigned(pt) do
+              begin
+                para_snapshot[snap_k]:=pt;
+                inc(snap_k);
+                pt:=tcallparanode(pt.right);
+              end;
+          end;
+
         { process all procs }
         hp:=FCandidateProcs;
         while assigned(hp) do
          begin
+           { for named-arg calls, restore the original chain order before
+             attempting per-candidate binding (the previous candidate may
+             have rebuilt the chain in its own paraidx order) }
+           if has_named_args then
+             begin
+               restore_chain_from_snapshot;
+               { combining named args with varargs is not supported -- the
+                 vararg slots have no parameter name to bind to. }
+               if po_varargs in hp^.data.procoptions then
+                 begin
+                   hp^.invalid:=true;
+                   hp^.wrongparaidx:=-1;
+                   hp^.wrongparanr:=0;
+                   hp:=hp^.next;
+                   continue;
+                 end;
+               if not try_bind_named_paras(FParaNode,hp^.data,slot_map,errmsg,errparam) then
+                 begin
+                   hp^.invalid:=true;
+                   hp^.wrongparaidx:=-1;
+                   hp^.wrongparanr:=0;
+                   hp:=hp^.next;
+                   continue;
+                 end;
+               { Rebuild the chain in paraidx-descending order, omitting
+                 default-filled (nil) slots. The scoring loop below uses
+                 chain order; modified paraidx-decrement skips nil slots. }
+               FParaNode:=nil;
+               for snap_k:=0 to high(slot_map) do
+                 if assigned(slot_map[snap_k]) then
+                   begin
+                     slot_map[snap_k].right:=FParaNode;
+                     FParaNode:=slot_map[snap_k];
+                   end;
+               { firstparaidx becomes the highest non-nil paraidx for this candidate }
+               hp^.firstparaidx:=high(slot_map);
+               while (hp^.firstparaidx>=0) and not assigned(slot_map[hp^.firstparaidx]) do
+                 dec(hp^.firstparaidx);
+               { the call's effective paralength now matches filled-slot count }
+               currparanr:=0;
+               for snap_k:=0 to high(slot_map) do
+                 if assigned(slot_map[snap_k]) then
+                   inc(currparanr);
+             end;
+
            { We compare parameters in reverse order (right to left),
              the firstpara is already pointing to the last parameter
              were we need to start comparing }
-           currparanr:=FParalength;
+           if not has_named_args then
+             currparanr:=FParalength;
            paraidx:=hp^.firstparaidx;
-           while (paraidx>=0) and (vo_is_hidden_para in tparavarsym(hp^.data.paras[paraidx]).varoptions) do
+           while (paraidx>=0) and ((vo_is_hidden_para in tparavarsym(hp^.data.paras[paraidx]).varoptions) or
+                                   (has_named_args and not assigned(slot_map[paraidx]))) do
              dec(paraidx);
            pt:=tcallparanode(FParaNode);
            while assigned(pt) and ((paraidx>=0) or (po_varargs in hp^.data.procoptions)) do
@@ -3224,10 +3322,13 @@ implementation
               if not(po_varargs in hp^.data.procoptions) or
                  (currparanr<=hp^.data.maxparacount) then
                begin
-                 { Ignore vs_hidden parameters }
+                 { Ignore vs_hidden parameters; for named-arg calls, also
+                   skip slots that were left default-filled (slot_map nil). }
                  repeat
                    dec(paraidx);
-                 until (paraidx<0) or not(vo_is_hidden_para in tparavarsym(hp^.data.paras[paraidx]).varoptions);
+                 until (paraidx<0) or
+                       (not(vo_is_hidden_para in tparavarsym(hp^.data.paras[paraidx]).varoptions)
+                        and ((not has_named_args) or assigned(slot_map[paraidx])));
                end;
               dec(currparanr);
             end;
@@ -3237,6 +3338,12 @@ implementation
            { next candidate }
            hp:=hp^.next;
          end;
+        { restore the chain to its original (parser) order so downstream
+          consumers (choose_best, error reporting) see the same shape that
+          callers passed in. The chosen candidate's reorder happens later
+          in tcallnode.pass_typecheck. }
+        if has_named_args then
+          restore_chain_from_snapshot;
       end;
 
 

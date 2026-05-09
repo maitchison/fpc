@@ -534,7 +534,7 @@ implementation
         paras: tnode;
       begin
         consume(_LKLAMMER);
-        paras:=parse_paras(false,false,_RKLAMMER);
+        paras:=parse_paras(false,false,false,_RKLAMMER);
         consume(_RKLAMMER);
         if not assigned(paras) then
          begin
@@ -553,7 +553,7 @@ implementation
         cp: tstringencoding;
       begin
         consume(_LKLAMMER);
-        paras:=parse_paras(false,false,_RKLAMMER);
+        paras:=parse_paras(false,false,false,_RKLAMMER);
         consume(_RKLAMMER);
         procname:='';
         if assigned(paras) and
@@ -613,7 +613,7 @@ implementation
         result := cerrornode.create;
 
         consume(_LKLAMMER);
-        paras:=parse_paras(false,false,_RKLAMMER);
+        paras:=parse_paras(false,false,false,_RKLAMMER);
         consume(_RKLAMMER);
         ppn:=tcallparanode(paras);
 
@@ -680,7 +680,7 @@ implementation
         result := cerrornode.create;
 
         consume(_LKLAMMER);
-        paras:=parse_paras(false,false,_RKLAMMER);
+        paras:=parse_paras(false,false,false,_RKLAMMER);
         consume(_RKLAMMER);
         if not assigned(paras) and checkempty then
           begin

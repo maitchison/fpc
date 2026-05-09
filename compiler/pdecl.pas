@@ -453,7 +453,7 @@ implementation
               { we only want constants here }
               old_block_type:=block_type;
               block_type:=bt_const;
-              result:=parse_paras(false,false,_RKLAMMER);
+              result:=parse_paras(false,false,false,_RKLAMMER);
               block_type:=old_block_type;
               consume(_RKLAMMER);
             end
