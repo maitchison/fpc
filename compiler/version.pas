@@ -39,7 +39,7 @@ interface
        version_nr = '3';
        release_nr = '3';
        patch_nr   = '6';
-       minorpatch = 'n';
+       minorpatch = 'o';
 
        { numeric mirrors of the strings above. Keep synced. }
        version_nr_int = 3;

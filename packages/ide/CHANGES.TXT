@@ -5,6 +5,44 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24o / Compiler 3.3.6o ==
+
+  New features:
+    * `managed record` with per-field defaults. Prefix a record with the
+      `managed` keyword (in either order with `packed`) and the compiler
+      synthesises a class operator Initialize that runs on every local-var
+      entry, New(), and SetLength() so each field starts at its declared
+      default:
+
+          {$mode objfpc}{$modeswitch advancedrecords}
+
+          type
+            tFrameHeader = packed managed record
+              magic:   dword = $DEADBEEF;
+              version: byte  = 1;
+              format:  byte  = 0;
+              flags:   word  = 17;
+            end;
+
+          var
+            h: tFrameHeader;
+          begin
+            // h.magic = $DEADBEEF, h.version = 1, ... already set on entry.
+          end.
+
+      The `managed` modifier is opt-in: a plain record with `field = expr'
+      is rejected ("field default requires `managed record'", err 03376),
+      so existing record types keep their POD layout and zero-cost var
+      entry. v1 supports single-value constants -- integer, byte/word/
+      dword, boolean, char, enum, nil, real. Strings and complex
+      expressions error with "field default expression too complex"
+      (err 03377). A managed record that already declares `class operator
+      Initialize` cannot also use field defaults (err 03378).
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24n / Compiler 3.3.6n ==
 
   Changes:
