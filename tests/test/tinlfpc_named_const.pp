@@ -1,4 +1,4 @@
-{ %OPT=-Si -OoNAMEDARGS }
+{ %OPT=-Si -Snamedargs }
 { %RESULT=0 }
 {
   Named args with const/var/out params and string types -- exercises the

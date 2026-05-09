@@ -177,11 +177,9 @@ Const
 
    { Supported optimizations, only used for information.
      Drives `fpc -i` / `fpc -io`. Must be a superset of every flag the
-     i386 codegen actually honours, otherwise users can't discover
-     them via -io. cs_opt_named_args is listed here too -- it isn't
-     added to any -O level set, so the switch only fires when the user
-     passes -OoNAMEDARGS explicitly, but it still wants to surface in
-     the help and IDE switch list. }
+     i386 codegen actually honours, otherwise users can't discover them
+     via -io. cs_opt_named_args is intentionally NOT here -- it's a
+     syntax switch (-Snamedargs) and surfaces in -Sn-style help instead. }
    supported_optimizerswitches = genericlevel1optimizerswitches+
                                  genericlevel2optimizerswitches+
                                  genericlevel3optimizerswitches+
@@ -197,7 +195,7 @@ Const
                                     listed explicitly to make them surface in -i / -io: }
                                   cs_opt_size,cs_opt_scheduler,cs_opt_autoinline,
                                   cs_opt_dead_store_eliminate,cs_opt_forcenostackframe,
-                                  cs_opt_consts,cs_opt_asm_inline,cs_opt_named_args];
+                                  cs_opt_consts,cs_opt_asm_inline];
 
    level1optimizerswitches = genericlevel1optimizerswitches;
    level2optimizerswitches = genericlevel2optimizerswitches + level1optimizerswitches +

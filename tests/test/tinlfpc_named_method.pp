@@ -1,4 +1,4 @@
-{ %OPT=-Si -OoNAMEDARGS }
+{ %OPT=-Si -Snamedargs }
 { %RESULT=0 }
 {
   Method call site: named-arg parsing must work for object methods, not

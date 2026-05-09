@@ -400,13 +400,15 @@ interface
            kept as a hook for the day the pipeline is stable. }
          cs_opt_asm_inline,
          { Compile-time named arguments at call sites: `f(x, name := value)`.
-           Default OFF -- a language-level extension, opt-in via -OoNAMEDARGS
-           or the IDE checkbox. With it off, `:=` inside a call-arg list
-           parses as today (always rejected, since `:=` is a statement,
+           Default OFF -- a language-level extension, opt-in via -Snamedargs
+           (a syntax switch, not an optimization) or the IDE checkbox under
+           Options | Compiler | Syntax. With it off, `:=` inside a call-arg
+           list parses as today (always rejected, since `:=` is a statement,
            not an expression). With it on, `IDENT := expr` in arg position
            is consumed as a named-arg name+value pair; positional args must
-           precede the first named one. See packages/ide/CHANGES.TXT 3.3.6o
-           for the user-visible spec. }
+           precede the first named one. The bit lives in toptimizerswitch
+           for historical reasons -- moving it would shift PPU bitmaps. See
+           packages/ide/CHANGES.TXT 3.3.6o for the user-visible spec. }
          cs_opt_named_args
        );
        toptimizerswitches = set of toptimizerswitch;
@@ -489,7 +491,11 @@ interface
          'UNUSEDPARA','CONSTS','FORLOOP',
          'SCCINLINEFIRST',
          'ASMINLINE',
-         'NAMEDARGS'
+         { cs_opt_named_args is reachable only via -Snamedargs (a syntax
+           switch, not an optimization). Empty string here keeps the
+           enum bit alive for PPU compatibility while preventing the
+           old -OoNAMEDARGS cmdline form from parsing. }
+         ''
        );
 
        { Numeric -OoKEY=N knobs (parsed by dirparse.UpdateOptimizerStr).

@@ -1,4 +1,4 @@
-{ %OPT=-Si -OoNAMEDARGS }
+{ %OPT=-Si -Snamedargs }
 { %RESULT=0 }
 program tinlfpc_named_basic;
 

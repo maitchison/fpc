@@ -5,6 +5,23 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24t / Compiler 3.3.6t ==
+
+  Changes:
+    * Named arguments at call sites are now opt-in via `-Snamedargs'
+      (a syntax switch) instead of `-OoNAMEDARGS'. Named-argument
+      support is a language extension, not a code-generation knob, so
+      it belongs alongside the other syntax options. The IDE checkbox
+      "Named arguments" moves from Options | Compiler | Optimizations
+      to Options | Compiler | Syntax. The old `-OoNAMEDARGS' cmdline
+      form no longer parses; rebuild any fp.cfg that referenced it.
+      `fpc -i' / `fpc -io' no longer surface NAMEDARGS as an optimizer
+      knob.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24s / Compiler 3.3.6s ==
 
   Fixes:
