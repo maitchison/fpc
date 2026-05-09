@@ -1241,12 +1241,13 @@ begin
     R.A.X:=R.B.X-(R.B.X-R.A.X) div 2 + 1;
     R.B.Y:=R.A.Y+3;
 
-    R.Move(0,R.B.Y-R.A.Y{+1}); R.B.Y:=R.A.Y+4;
+    R.Move(0,R.B.Y-R.A.Y{+1}); R.B.Y:=R.A.Y+5;
     R2.Copy(R); R2.Grow(-1,-1);
     New(CB3, Init(R2,
       NewSItem(label_preferences_showclock,
       NewSItem(label_preferences_showheapmonitor,
-      nil))));
+      NewSItem(label_preferences_heapdetail,
+      nil)))));
     CB3^.Value:=DesktopPreferences;
     if OverrideHeapMonitor then  { if heap monitor state is set by fp parameter }
       CB3^.EnableMask:=CB3^.EnableMask and not(dpHeapMonitor); { disable heap monitor check box }

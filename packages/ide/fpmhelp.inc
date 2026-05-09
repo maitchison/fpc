@@ -364,3 +364,17 @@ begin
   Dispose(S, Done);
 end;
 
+procedure TIDEApp.DoHeapDump;
+var
+  path: string;
+  msg: string;
+begin
+  path := IDEDir + 'fpheap.log';
+  if DumpHeapDiagnostics(path) then
+    msg := 'Heap diagnostics written to:'#13 + path
+  else
+    msg := 'Failed to write heap diagnostics to:'#13 + path + #13 +
+           '(check that the IDE directory is writable.)';
+  InformationBox(msg, nil);
+end;
+

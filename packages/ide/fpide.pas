@@ -150,6 +150,7 @@ type
       procedure HelpFiles;
       procedure About;
       procedure WhatsNew;
+      procedure DoHeapDump;
       procedure CreateAnsiFile;
     public
       procedure SourceWindowClosed;
@@ -202,6 +203,7 @@ uses
   Systems,
   WUtils,WHlpView,WViews,WHTMLHlp,WHelp,WConsole,
   FPConst,FPVars,FPUtils,FPIni,FPIntf,FPCompil,FPHelp,
+  FPHeap,
   FPTemplt,FPCalc,FPUsrScr,FPTools,FPRnPro,FPFindF,
 {$ifndef NODEBUG}
   FPDebug,FPRegs,
@@ -331,6 +333,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_tools_grep        = '~G~rep';
                 menu_tools_calculator  = '~C~alculator';
                 menu_tools_asciitable  = 'ASCII ~T~able';
+                menu_tools_heapdump    = '~D~ump heap diagnostics...';
 
                 menu_options           = '~O~ptions';
                 menu_options_mode      = 'Mode~.~..';
@@ -380,6 +383,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_help_using        = '~U~sing help';
                 menu_help_files        = '~F~iles...';
                 menu_help_whatsnew     = '~W~hat''s new...';
+                menu_help_heapstatus   = 'Heap st~a~tus...';
                 menu_help_about        = '~A~bout...';
 
                 { Source editor local menu items }
@@ -692,6 +696,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 label_preferences_options = 'Options';
                 label_preferences_showclock = 'Show ~c~lock';
                 label_preferences_showheapmonitor = 'Show heap ~m~onitor';
+                label_preferences_heapdetail = '~D~etailed heap (IDE/DPMI)';
                 label_preferences_clockheap = 'Desktop';
 
                 {Desktop preferences dialog.}
@@ -1058,7 +1063,9 @@ begin
       NewItem(menu_tools_grep,menu_key_tools_grep, kbShiftF2, cmGrep, hcGrep,
       NewItem(menu_tools_calculator, '', kbNoKey, cmCalculator, hcCalculator,
       NewItem(menu_tools_asciitable, '', kbNoKey, cmAsciiTable, hcAsciiTable,
-      nil)))))))),
+      NewLine(
+      NewItem(menu_tools_heapdump, '', kbNoKey, cmHeapDump, hcHeapDump,
+      nil))))))))),
     NewSubMenu(menu_options, hcOptionsMenu, NewMenu(
       NewItem(menu_options_mode,'', kbNoKey, cmSwitchesMode, hcSwitchesMode,
       NewItem(menu_options_compiler,'', kbNoKey, cmCompiler, hcCompiler,
@@ -1123,8 +1130,9 @@ begin
       NewItem(menu_help_files,'',kbNoKey, cmHelpFiles, hcHelpFiles,
       NewLine(
       NewItem(menu_help_whatsnew,'',kbNoKey, cmWhatsNew, hcWhatsNew,
+      NewItem(menu_help_heapstatus,'',kbNoKey, cmHeapStatus, hcHeapStatus,
       NewItem(menu_help_about,'',kbNoKey, cmAbout, hcAbout,
-      nil)))))))))),
+      nil))))))))))),
     nil)))))))))))));
 end;
 
@@ -1489,6 +1497,8 @@ begin
              cmHelpFiles     : HelpFiles;
              cmAbout         : About;
              cmWhatsNew      : WhatsNew;
+             cmHeapStatus    : ShowHeapStatusDialog;
+             cmHeapDump      : DoHeapDump;
              cmShowReadme    : ShowReadme;
              cmResizeApp     : ResizeApplication(Event.Id, Event.InfoWord);
              cmQuitApp       : Message(@Self, evCommand, cmQuit, nil);
@@ -1933,12 +1943,19 @@ end;
 
 procedure TIDEApp.UpdateClockAndHeap;
 var R : TRect;
+    HeapW : sw_integer;
 begin
   if not OverrideHeapMonitor then
   begin
     Application^.Delete(HeapView);
-    GetExtent(R); Dec(R.B.X); R.A.X:=R.B.X-8; R.A.Y:=R.B.Y-1;
-    HeapView^.MoveTo(R.A.X,R.A.Y);       {move to correct position}
+    GetExtent(R); Dec(R.B.X);
+    if (DesktopPreferences and dpHeapDetail)<>0 then
+      HeapW:=12 { "I 99m D 99m" }
+    else
+      HeapW:=8;
+    R.A.X:=R.B.X-HeapW; R.A.Y:=R.B.Y-1;
+    HeapView^.GrowTo(HeapW,1);             {resize for the new mode}
+    HeapView^.MoveTo(R.A.X,R.A.Y);         {move to correct position}
     if ((DesktopPreferences and dpHeapMonitor)<>0) then
       Application^.Insert(HeapView);
   end;
