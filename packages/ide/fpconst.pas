@@ -23,7 +23,7 @@ uses Views,App,
      WViews,WEditor,WHTMLHlp;
 
 const
-     VersionStr           = '1.0.24r';  { ships with Compiler 3.3.6r }
+     VersionStr           = '1.0.24s';  { ships with Compiler 3.3.6s }
 
 {$ifdef HAS_REVINC}
      BuildCommitStr       = '-'+{$i ide_revision.inc};

@@ -1044,8 +1044,8 @@ interface
             movl $0x500,%eax
             int $0x31
             pushf
-            movb %al,__RESULT
             call test_int31
+            movb %al,__RESULT
             popl %edi
          end;
       end;
