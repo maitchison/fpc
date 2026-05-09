@@ -56,6 +56,13 @@ function DefIndexFindIncludeParent(const FileName: string): string;
   Match is by basename, case-insensitive; if multiple modules include a
   file with this basename, the first one wins. }
 
+function DefIndexResolveSourceFile(const FileName: string): string;
+{ Given a bare basename (or a partial path), returns the full path of any
+  source file with that basename recorded in BrowCol.Modules' SourceFiles
+  list. Returns FileName unchanged if no match (so the caller can still
+  attempt to open it). Used to expand the bare-basename filenames stored
+  in TReference into full paths the IDE can open and stale-check. }
+
 function DefIndexResolve(const Name: string): PDefMatchList;
 { Returns a newly-allocated list of matches; caller must Dispose it.
   Returns nil if no symbol info is loaded. Returns an empty list if
@@ -247,6 +254,42 @@ begin
     end;
 end;
 
+function DefIndexResolveSourceFile(const FileName: string): string;
+var
+  i, j: sw_integer;
+  M: PModuleSymbol;
+  P: PString;
+  Target: string;
+begin
+  DefIndexResolveSourceFile:=FileName;
+  if not DefIndexAvailable then exit;
+  if FileName='' then exit;
+  Target:=UpcaseStr(NameAndExtOf(FileName));
+  if Target='' then exit;
+  for i:=0 to BrowCol.Modules^.Count-1 do
+    begin
+      M:=PModuleSymbol(BrowCol.Modules^.At(i));
+      if M=nil then continue;
+      if (M^.MainSource<>nil) and
+         (UpcaseStr(NameAndExtOf(M^.MainSource^))=Target) then
+        begin
+          DefIndexResolveSourceFile:=M^.MainSource^;
+          exit;
+        end;
+      if M^.SourceFiles=nil then continue;
+      for j:=0 to M^.SourceFiles^.Count-1 do
+        begin
+          P:=PString(M^.SourceFiles^.At(j));
+          if P=nil then continue;
+          if UpcaseStr(NameAndExtOf(P^))=Target then
+            begin
+              DefIndexResolveSourceFile:=P^;
+              exit;
+            end;
+        end;
+    end;
+end;
+
 procedure AddSymMatch(List: PDefMatchList; S: PSymbol; const OwnerName: string);
 var
   M: PDefMatch;
@@ -258,6 +301,10 @@ begin
   if R=nil then exit;
   fn:=R^.GetFileName;
   if fn='' then exit;
+  { Reference filenames are bare basenames (e.g. 'foo.inc'); expand to the
+    full path recorded in BrowCol.Modules' SourceFiles so callers can both
+    open the file and run a meaningful staleness check. }
+  fn:=DefIndexResolveSourceFile(fn);
   New(M);
   FillChar(M^, SizeOf(M^), 0);
   M^.FileName:=NewStr(fn);

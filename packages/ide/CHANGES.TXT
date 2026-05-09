@@ -5,6 +5,19 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24p / Compiler 3.3.6p ==
+
+  Fixes:
+    * Shift+Tab / Ctrl+Enter once again locates symbols after a fresh
+      compile-with-browser; 1.0.24l-1.0.24o regressed most lookups to
+      "symbol not found" because the compiler started recording
+      reference filenames as full paths rather than basenames. Reverted
+      to bare basenames; the IDE now expands them to full paths via the
+      browser-info module's source-file list at lookup time, which still
+      resolves include-file definitions without needing the .inc dir on
+      the source-search path.
+
+
 == IDE 1.0.24o / Compiler 3.3.6o ==
 
   New features:
