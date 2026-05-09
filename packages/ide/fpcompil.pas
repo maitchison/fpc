@@ -112,6 +112,14 @@ function  NeedRecompile(Mode :TCompileMode; verbose : boolean): boolean;
 function  GetExePath: string;
 procedure ParseUserScreen;
 
+procedure UnhookCompilerOutput;
+{ Restore the compiler's verbose-output hooks (do_comment, do_status) to
+  their stderr-safe defaults from comphook.pas. Call right before the
+  IDE's program block ends so that any compiler-unit finalization (which
+  runs *after* IDEApp.Done has set Desktop:=nil and Application down)
+  cannot route a stray Comment(...) call through CompilerComment, where
+  the Desktop^.First / CompilerMessageWindow^ derefs would crash. }
+
 procedure RegisterFPCompile;
 
 const
@@ -1167,6 +1175,17 @@ begin
     ReadSymbolsFile(BrowserName);
   if UseAllUnitsInCodeComplete and not assigned(CompilingHiddenFile) then
     AddAvailableUnitsToCodeComplete(false);
+end;
+
+procedure UnhookCompilerOutput;
+begin
+  do_status        := @def_status;
+  do_comment       := @def_comment;
+  do_openinputfile := @def_openinputfile;
+  do_getnamedfiletime := @def_getnamedfiletime;
+  do_initsymbolinfo := @def_initsymbolinfo;
+  do_donesymbolinfo := @def_donesymbolinfo;
+  do_extractsymbolinfo := @def_extractsymbolinfo;
 end;
 
 function NeedRecompile(Mode :TCompileMode; verbose : boolean): boolean;

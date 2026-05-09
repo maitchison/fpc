@@ -5,6 +5,18 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24s / Compiler 3.3.6s ==
+
+  Fixes:
+    * IDE no longer crashes during the Alt+X exit sequence on installs
+      that ran a compile during the session. The compiler's verbose-
+      output hooks (do_comment / do_status) are now restored to their
+      stderr-safe defaults right after IDEApp.Done, so any compiler-
+      unit finalization that fires after the IDE program block ends
+      cannot route through the now-disposed Desktop / Compiler-Message
+      window.
+
+
 == IDE 1.0.24r / Compiler 3.3.6r ==
 
   Changes:

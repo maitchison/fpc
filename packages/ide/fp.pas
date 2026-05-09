@@ -606,6 +606,12 @@ BEGIN
 
   DelTempFiles;
   IDEApp.Done;
+  { Desktop / Application are gone now -- restore the compiler's verbose
+    hooks to their stderr-safe defaults so the unit-finalization wave that
+    runs after this program block ends cannot route a stray Comment(...)
+    or status update through CompilerComment / CompilerStatus, where the
+    Desktop^ and CompilerMessageWindow^ derefs would crash. }
+  UnhookCompilerOutput;
   WriteSwitches(SwitchesPath);
 
 {$IFDEF HasSignal}
