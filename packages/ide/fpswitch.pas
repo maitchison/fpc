@@ -84,6 +84,12 @@ type
         (no flag in cfg) and unticking emits the negation. The flip lives
         in TSwitches.GetBooleanItem / SetBooleanItem. }
       Inverse : boolean;
+      { PrefixOverride <> #0 detaches the cfg-emitted prefix character from
+        the parent TSwitches' group prefix. Lets a tickbox live in one
+        Options pane (e.g. Syntax for a language-feature toggle) while
+        still emitting the underlying compiler flag (-Oo<NAME>) the
+        option parser expects. #0 = inherit the group's prefix. }
+      PrefixOverride : AnsiChar;
       constructor Init(const n,p:string; AID: TParamID);
       function  NeedParam:boolean;virtual;
       procedure Reset;virtual;
@@ -137,6 +143,7 @@ type
       procedure AddSelectItem(const name,param:string; AID: TParamID);
       procedure AddDefaultSelect(const name:string);
       procedure AddBooleanItem(const name,param:string; AID: TParamID);
+      procedure AddBooleanItemPrefixed(const name:string; pfx:AnsiChar; const param:string; AID: TParamID);
       procedure AddInverseBooleanItem(const name,param:string; AID: TParamID);
       procedure AddLongintItem(const name,param:string; AID: TParamID);
       procedure AddStringItem(const name,param:string;AID: TParamID;mult,allowspaces:boolean);
@@ -468,6 +475,7 @@ begin
   Inherited Init(n,p,AID);
   Typ:=ot_Boolean;
   Inverse:=false;
+  PrefixOverride:=#0;
   Reset;
 end;
 
@@ -658,6 +666,16 @@ end;
 procedure TSwitches.AddBooleanItem(const name,param:string; AID: TParamID);
 begin
   Items^.Insert(New(PBooleanItem,Init(name,Param,AID)));
+end;
+
+
+procedure TSwitches.AddBooleanItemPrefixed(const name:string; pfx:AnsiChar; const param:string; AID: TParamID);
+var
+  P : PBooleanItem;
+begin
+  P:=New(PBooleanItem,Init(name,Param,AID));
+  P^.PrefixOverride:=pfx;
+  Items^.Insert(P);
 end;
 
 
@@ -900,9 +918,17 @@ var
   var
     s,s1 : string;
     i,j : integer;
+    EffPref : AnsiChar;
   begin
     if P^.NeedParam then
      begin
+       { TBooleanItem.PrefixOverride lets a single tickbox emit a flag
+         under a different group character than its host TSwitches
+         (e.g. a Syntax-pane checkbox that still writes -Oo<NAME>). }
+       if (P^.Typ=ot_Boolean) and (PBooleanItem(P)^.PrefixOverride<>#0) then
+         EffPref:=PBooleanItem(P)^.PrefixOverride
+       else
+         EffPref:=Pref;
        if (P^.Typ=ot_string) and (PStringItem(P)^.Multiple) then
          begin
            s:=PStringItem(P)^.Str[SwitchesMode];
@@ -918,14 +944,14 @@ var
                i:=j;
              s1:=Copy(s,1,i-1);
              if s1<>'' then
-              writeln(CfgFile,' -'+Pref+P^.Param+s1);
+              writeln(CfgFile,' -'+EffPref+P^.Param+s1);
              Delete(s,1,i);
            until s='';
          end
        else
          if P^.Param<>'/' then
            for i:=0 to p^.ParamCount-1 do
-             Writeln(CfgFile,' -'+Pref+P^.Param+P^.ParamValue(i));
+             Writeln(CfgFile,' -'+EffPref+P^.Param+P^.ParamValue(i));
      end;
   end;
 
@@ -1111,6 +1137,11 @@ begin
                res:=OptimizationSwitches^.ReadItemsCfg(s);
                if not res then
                  res:=ProcessorOptimizationSwitches^.ReadItemsCfg(s);
+               { -Oo<NAME> tickboxes that have been re-homed into the
+                 Syntax pane (e.g. -OoNAMEDARGS) still need to round-trip
+                 from the cfg back to their ticked state. }
+               if not res then
+                 res:=SyntaxSwitches^.ReadItemsCfg(s);
              end;
        'M' : res:=CompilerModeSwitches^.ReadItemsCfg(s);
        'p' : res:=ProfileInfoSwitches^.ReadItemsCfg(s);
@@ -1283,6 +1314,12 @@ begin
      AddBooleanItem(opt_kylix,'k',idNone);
      AddBooleanItem(opt_allowstaticinobjects,'s',idNone);
      AddBooleanItem(opt_clikeoperators,'c',idNone);
+     { cs_opt_named_args is parsed as an -O knob (-OoNAMEDARGS) so the
+       compiler-side flag stays under the optimizer-switch family, but
+       the tickbox semantically belongs in Syntax -- it's a language
+       extension at call sites, not a codegen tweak. PrefixOverride='O'
+       keeps the cfg surface (-OoNAMEDARGS) intact. }
+     AddBooleanItemPrefixed(opt_named_args,'O','oNAMEDARGS',idNone);
      { Useless as they are not passed to the compiler PM
      AddBooleanItem(opt_strictvarstrings,'/',idStrictVarStrings);
      AddBooleanItem(opt_extendedsyntax,'/',idExtendedSyntax);
@@ -1357,10 +1394,6 @@ begin
        emits -OoSCHEDULE so the i386 PMMX U/V pair reorderer runs.
        Only effective on -OpPENTIUM[MMX] targets (early-exits otherwise). }
      AddBooleanItem(opt_pmmx_scheduler,'oSCHEDULE',idNone);
-     { cs_opt_named_args defaults OFF; "tick to enable" -- emits
-       -OoNAMEDARGS so call sites accept `name := value' syntax. Strict
-       language extension; existing positional-only code is unaffected. }
-     AddBooleanItem(opt_named_args,'oNAMEDARGS',idNone);
    end;
   New(ProcessorOptimizationSwitches,InitSelect('O'));
   with ProcessorOptimizationSwitches^ do

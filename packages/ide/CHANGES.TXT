@@ -5,6 +5,16 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24r / Compiler 3.3.6r ==
+
+  Changes:
+    * "Named arguments" tickbox moved from Options | Compiler |
+      Optimizations to Options | Compiler | Syntax -- it's a language
+      extension at the call site, not a codegen knob, so it now sits
+      next to the other syntax toggles. The compiler-side flag is still
+      -OoNAMEDARGS; existing fp.cfg files round-trip unchanged.
+
+
 == IDE 1.0.24q / Compiler 3.3.6q ==
 
   New features:
