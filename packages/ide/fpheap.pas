@@ -46,7 +46,7 @@ type
 {$endif}
   end;
 
-procedure GatherHeapInfo(out info: THeapInfo);
+procedure GatherHeapInfo(var info: THeapInfo);
 
 { Format the bottom-right widget contents for the detailed mode.
   Caller decides width via WidthCols; we trim to fit. }
@@ -134,7 +134,7 @@ end;
 
 { ----------------------------- gather ------------------------------------- }
 
-procedure GatherHeapInfo(out info: THeapInfo);
+procedure GatherHeapInfo(var info: THeapInfo);
 {$ifdef go32v2}
 var
   mi: tmeminfo;
@@ -210,6 +210,7 @@ begin
   R.Assign(0, 0, 56, 17);
   inherited Init(R, 'Heap status');
   Options := Options or ofCentered;
+  EventMask := EventMask or evIdle;
   HelpCtx := hcHeapStatus;
   GetExtent(R); R.Grow(-2, -1);
 
@@ -290,13 +291,8 @@ begin
 end;
 
 procedure ShowHeapStatusDialog;
-var
-  D: PHeapStatusDialog;
 begin
-  New(D, Init);
-  D^.EventMask := D^.EventMask or evIdle;
-  Application^.ExecView(D);
-  Dispose(D, Done);
+  Application^.ExecuteDialog(New(PHeapStatusDialog, Init), nil);
 end;
 
 { ----------------------------- dump --------------------------------------- }

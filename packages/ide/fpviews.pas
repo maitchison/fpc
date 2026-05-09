@@ -2703,7 +2703,7 @@ end;
 
 procedure TFPHeapView.Draw;
 var
-  S: Sw_String;
+  S: string;
   C: Byte;
   B: TDrawBuffer;
   info: THeapInfo;

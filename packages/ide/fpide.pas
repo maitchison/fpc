@@ -1065,7 +1065,7 @@ begin
       NewItem(menu_tools_asciitable, '', kbNoKey, cmAsciiTable, hcAsciiTable,
       NewLine(
       NewItem(menu_tools_heapdump, '', kbNoKey, cmHeapDump, hcHeapDump,
-      nil))))))))),
+      nil)))))))))),
     NewSubMenu(menu_options, hcOptionsMenu, NewMenu(
       NewItem(menu_options_mode,'', kbNoKey, cmSwitchesMode, hcSwitchesMode,
       NewItem(menu_options_compiler,'', kbNoKey, cmCompiler, hcCompiler,
