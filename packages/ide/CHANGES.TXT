@@ -5,6 +5,18 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24u / Compiler 3.3.6u ==
+
+  Changes:
+    * Help | About... is now reachable by pressing `A' in the Help menu.
+      Previously `A' selected Heap status (the active hotkey letter from
+      "Heap st~a~tus..."), so About could only be opened with the mouse
+      or arrow keys. The Heap status hotkey moves to `S' ("Heap status...").
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24t / Compiler 3.3.6t ==
 
   Changes:
