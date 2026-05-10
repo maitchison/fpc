@@ -383,7 +383,7 @@ resourcestring  menu_local_gotosource = '~G~oto source';
                 menu_help_using        = '~U~sing help';
                 menu_help_files        = '~F~iles...';
                 menu_help_whatsnew     = '~W~hat''s new...';
-                menu_help_heapstatus   = 'Heap st~a~tus...';
+                menu_help_heapstatus   = 'Heap ~s~tatus...';
                 menu_help_about        = '~A~bout...';
 
                 { Source editor local menu items }
