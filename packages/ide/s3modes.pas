@@ -34,6 +34,7 @@ implementation
 
 uses
   Dos,
+  WINI,WUtils,FPVars,FPUtils,
   VESA;
 
 type
@@ -131,11 +132,79 @@ begin
   dos.intr($10,r);
 end;
 
+{ The probe can only confirm a mode by setting it, and every set is a visible
+  mode change, so the result is cached in fp.ini and keyed on the adapter's OEM
+  string. This runs before the IDE reads its configuration, hence its own
+  reader rather than fpini. }
+const
+  S3Section = 'Screen';
+  S3SigTag  = 'S3Signature';
+  S3ModeTag = 'S3Modes';
+
+function S3CachePath: string;
+var
+  s : string;
+begin
+  s:=LocateFile(INIFileName);
+  if s='' then
+    s:=INIFileName;
+  S3CachePath:=s;
+end;
+
+{ OEM string reduced to characters an ini value can round-trip }
+function S3Signature: string;
+var
+  oem : string;
+  i   : integer;
+begin
+  oem:=VESAGetOemString;
+  for i:=1 to length(oem) do
+    if (oem[i]<#32) or (oem[i] in ['=',';','"','''',',']) then
+      oem[i]:='_';
+  S3Signature:=oem;
+end;
+
+{ 'mode:cols:rows' triples separated by commas, mode in decimal }
+function RegisterCachedModes(List: string): word;
+var
+  registered  : word;
+  item        : string;
+  p           : integer;
+  vals        : array[1..3] of longint;
+  n,code      : integer;
+begin
+  registered:=0;
+  while List<>'' do
+    begin
+      p:=Pos(',',List);
+      if p=0 then
+        begin item:=List; List:=''; end
+      else
+        begin item:=Copy(List,1,p-1); Delete(List,1,p); end;
+      for n:=1 to 3 do
+        begin
+          p:=Pos(':',item);
+          if p=0 then
+            begin Val(item,vals[n],code); item:=''; end
+          else
+            begin Val(Copy(item,1,p-1),vals[n],code); Delete(item,1,p); end;
+          if code<>0 then
+            begin vals[n]:=0; break; end;
+        end;
+      if (vals[1]>0) and (vals[2]>0) and (vals[3]>0) then
+        if RegisterS3VideoMode(byte(vals[1]),word(vals[2]),word(vals[3]),true) then
+          Inc(registered);
+    end;
+  RegisterCachedModes:=registered;
+end;
+
 function S3DetectAndProbe : word;
 var
   registered : word;
   origMode   : byte;
   i          : integer;
+  ini        : PINIFile;
+  sig,found  : string;
 begin
   registered:=0;
   S3DetectAndProbe:=0;
@@ -143,7 +212,19 @@ begin
   S3Detected:=DetectS3;
   if not S3Detected then exit;
 
+  sig:=S3Signature;
+  New(ini, Init(S3CachePath));
+  ini^.Read;
+  if ini^.GetEntry(S3Section,S3SigTag,'')=sig then
+    begin
+      registered:=RegisterCachedModes(ini^.GetEntry(S3Section,S3ModeTag,''));
+      Dispose(ini,Done);
+      S3DetectAndProbe:=registered;
+      exit;
+    end;
+
   origMode:=GetCurrentMode;
+  found:='';
 
   for i:=Low(S3Candidates) to High(S3Candidates) do
     begin
@@ -153,13 +234,23 @@ begin
                                  S3Candidates[i].Cols,
                                  S3Candidates[i].Rows,
                                  true) then
-            Inc(registered);
+            begin
+              Inc(registered);
+              if found<>'' then found:=found+',';
+              found:=found+IntToStr(S3Candidates[i].ModeByte)+':'+
+                           IntToStr(S3Candidates[i].Cols)+':'+
+                           IntToStr(S3Candidates[i].Rows);
+            end;
         end;
     end;
 
-  { Restore the mode that was active before we started probing. The probe
-    may have left the card in whatever candidate we last set. }
-  RestoreMode(origMode);
+  if GetCurrentMode<>origMode then
+    RestoreMode(origMode);
+
+  ini^.SetEntry(S3Section,S3SigTag,sig);
+  ini^.SetEntry(S3Section,S3ModeTag,found);
+  ini^.Update;
+  Dispose(ini,Done);
 
   S3DetectAndProbe:=registered;
 end;
