@@ -108,6 +108,7 @@ begin
       Mode.col:=x;
       Mode.row:=y;
       SetScreenVideoMode(Mode);
+      ApplyIDEPalette;
       UpdateRecentFileList; {ensure file menu not go over screen}
       Redraw;
     end;

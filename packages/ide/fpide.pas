@@ -209,7 +209,7 @@ uses
   FPDebug,FPRegs,
 {$endif}
   FPRedir,
-  FPDesk,FPCodCmp,FPCodTmp,FPDefIdx;
+  FPDesk,FPCodCmp,FPCodTmp,FPDefIdx,FPDac;
 
 type
    TTargetedEvent = record
@@ -1585,6 +1585,7 @@ begin
     ButtonCount:=0;
 {  DoneDosMem;}
 
+  RestoreDefaultPalette;
   if Assigned(UserScreen) then
     UserScreen^.SwitchToConsoleScreen;
 end;
@@ -1641,6 +1642,7 @@ begin
 {$ifdef Unix}
   SetKnownKeys;
 {$endif Unix}
+  ApplyIDEPalette;
  {$ifndef Windows}
 {$ifndef go32v2}
   UpdateScreen(true);

@@ -1299,6 +1299,7 @@ begin
                  ScreenModeInfo [2] := VM.Row;
                  ScreenModeInfo [3] := byte (VM.Color);
                 end;
+             ApplyIDEPalette;
            End;
        end;
      AutoSaveOptions:=CB1^.Value;

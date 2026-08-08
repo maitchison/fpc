@@ -88,7 +88,7 @@ uses
 {$endif GDBMI}
 {$endif}
   FPTemplt,FPRedir,FPDesk,
-  FPCodTmp,FPCodCmp,
+  FPCodTmp,FPCodCmp,FPDac,
 
   systems,globtype,globals;
 
@@ -507,6 +507,9 @@ BEGIN
   LoadDesktop;
   Phase('load desktop');
 
+  { after LoadDesktop, which may have changed the video mode }
+  InitIDEPalette;
+
   {Adjust to current directory, might be changed by LoadDesktop.}
   IDEapp.CurDirChanged;
 
@@ -642,6 +645,7 @@ BEGIN
   DoneDesktopFile;
 
   DelTempFiles;
+  RestoreDefaultPalette;
   IDEApp.Done;
   WriteSwitches(SwitchesPath);
 
