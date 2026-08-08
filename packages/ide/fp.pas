@@ -399,6 +399,7 @@ var
 
 var
   _GDBVersion: String;
+  PrevCurrent: PView;
 
 BEGIN
 {$ifdef go32v2}
@@ -512,6 +513,17 @@ BEGIN
   {Menubar might be changed because of loading INI file.}
   IDEapp.reload_menubar;
   Phase('menubar');
+
+  { Come up showing the last build's messages, but leave the cursor wherever
+    the desktop put it. }
+  if Assigned(CompilerMessageWindow) and Assigned(Desktop) then
+    begin
+      PrevCurrent:=Desktop^.Current;
+      if not CompilerMessageWindow^.GetState(sfVisible) then
+        CompilerMessageWindow^.Show;
+      if Assigned(PrevCurrent) and (PrevCurrent<>PView(CompilerMessageWindow)) then
+        PrevCurrent^.Select;
+    end;
 
   { Handle Standard Units. The standard-unit list is NOT built here: doing so
     means compiling a synthetic unit before the editor is usable. It is built
