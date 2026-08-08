@@ -23,7 +23,7 @@
   Values live in fp.ini so they can be tuned without a rebuild:
 
     [Screen]
-    Color1=0,0,28        ; blue -- the default editor background
+    Color1=0,0,16        ; blue -- the default editor background
     Color14=63,63,21     ; yellow
 
   Components are the VGA's native 0..63. Colour numbers are the familiar 0..15
@@ -119,7 +119,7 @@ begin
 
   { Blue is the editor background and the stock one is bright enough to fight
     the text. Put Color1=0,0,42 in fp.ini to get the BIOS blue back. }
-  OverrideRGB[1,0]:=0; OverrideRGB[1,1]:=0; OverrideRGB[1,2]:=28;
+  OverrideRGB[1,0]:=0; OverrideRGB[1,1]:=0; OverrideRGB[1,2]:=16;
   Overridden[1]:=true;
   AnyOverride:=true;
 

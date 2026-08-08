@@ -13,7 +13,7 @@ Help | What's new...
       the ones you want in fp.ini and restart:
 
           [Screen]
-          Color1=0,0,28
+          Color1=0,0,16
           Color14=63,63,21
 
       Components run 0..63, and the colour number is the usual 0..15. This
