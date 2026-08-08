@@ -1656,7 +1656,12 @@ BEGIN
   if not VideoInitialized then
     exit;
 {$IFNDEF WINDOWS}
-  {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.SetVideoMode(StartupScreenMode);
+  { SetVideoMode does not check whether the mode is already current, and on a
+    real adapter a mode set is a visible reprogram, so only restore if it differs. }
+  if (ScreenMode.Col<>StartupScreenMode.Col) or
+     (ScreenMode.Row<>StartupScreenMode.Row) or
+     (ScreenMode.Color<>StartupScreenMode.Color) then
+    {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.SetVideoMode(StartupScreenMode);
   {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.ClearScreen;
   {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.SetCursorPos(0,0);
 {$ENDIF}
