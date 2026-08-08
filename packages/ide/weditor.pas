@@ -805,7 +805,9 @@ const
      paste_key:word=kbShiftIns;
      all_key:word=kbNoKey;
 
-     CodeCompleteMinLen : byte = 4; { minimum length of text to try to complete }
+     {chars typed before completion is offered. Lower means more offers and more
+      list walking on every keystroke. Settable in Options|Environment|Code complete.}
+     CodeCompleteMinLen : byte = 2;
 
      ToClipCmds         : TCommandSet = ([cmCut,cmCopy,cmCopyWin,
        { cmUnselect should because like cut, copy, copywin:
