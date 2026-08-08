@@ -239,30 +239,75 @@ begin
   SysSetCursorType(SysGetCursorType);
 end;
 
+{ Writes only the changed span. Text memory is slow to write on real hardware,
+  and a keystroke usually dirties a handful of cells, so sending the whole
+  buffer costs far more than finding the range. Both scans work in dwords, so
+  a trailing odd cell is never compared -- when the last dword differs the
+  write is extended to the end of the buffer to cover it. }
 procedure SysUpdateScreen(Force: Boolean);
+var
+  DwordCount, First, Last, Ofs, Len : longint;
+  Changed : boolean;
 begin
-  HideMouse;
-  if not force then
-   begin
-     asm
-        pushl   %esi
-        pushl   %edi
-        movl    VideoBuf,%esi
-        movl    OldVideoBuf,%edi
-        movl    VideoBufSize,%ecx
-        shrl    $2,%ecx
-        repe
-        cmpsl
-        setne   force
-        popl    %edi
-        popl    %esi
-     end;
-   end;
+  DwordCount:=VideoBufSize div 4;
+  if DwordCount=0 then
+    exit;
+
   if Force then
-   begin
-     dosmemput(videoseg,0,videobuf^,VideoBufSize);
-     move(videobuf^,oldvideobuf^,VideoBufSize);
-   end;
+    begin
+      First:=0;
+      Last:=DwordCount-1;
+    end
+  else
+    begin
+      Changed:=false;
+      First:=0;
+      asm
+         pushl   %esi
+         pushl   %edi
+         movl    VideoBuf,%esi
+         movl    OldVideoBuf,%edi
+         movl    DwordCount,%ecx
+         cld
+         repe
+         cmpsl
+         setne   Changed
+         movl    %ecx,First
+         popl    %edi
+         popl    %esi
+      end;
+      if not Changed then
+        exit;
+      { %ecx counts down, so the first differing dword is DwordCount-1-%ecx }
+      First:=DwordCount-1-First;
+
+      Last:=0;
+      asm
+         pushl   %esi
+         pushl   %edi
+         movl    VideoBuf,%esi
+         movl    OldVideoBuf,%edi
+         movl    DwordCount,%ecx
+         leal    -4(%esi,%ecx,4),%esi
+         leal    -4(%edi,%ecx,4),%edi
+         std
+         repe
+         cmpsl
+         cld
+         movl    %ecx,Last
+         popl    %edi
+         popl    %esi
+      end;
+    end;
+
+  Ofs:=First*4;
+  Len:=(Last-First+1)*4;
+  if Last=DwordCount-1 then
+    Len:=VideoBufSize-Ofs;
+
+  HideMouse;
+  dosmemput(videoseg,Ofs,VideoBuf^[Ofs div 2],Len);
+  Move(VideoBuf^[Ofs div 2],OldVideoBuf^[Ofs div 2],Len);
   ShowMouse;
 end;
 
