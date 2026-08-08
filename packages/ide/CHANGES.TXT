@@ -5,6 +5,59 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24v / Compiler 3.3.6v ==
+
+  New features:
+    * The sixteen text colours can now be redefined, so the editor is no
+      longer limited to the colours the adapter happens to boot with. Put
+      the ones you want in fp.ini and restart:
+
+          [Screen]
+          Color1=0,0,28
+          Color14=63,63,21
+
+      Components run 0..63, and the colour number is the usual 0..15. This
+      is separate from Options | Environment | Colors, which chooses WHICH
+      of the sixteen a given piece of text uses; this chooses what those
+      sixteen look like.
+
+      The editor background is a darker blue out of the box. Set
+      Color1=0,0,42 for the old one.
+
+      Requires real VGA colour output. Emulators that draw text with their
+      own fixed colour scheme ignore it.
+
+    * `fp -X' starts the IDE, then exits and prints where the startup time
+      went. Useful for finding out which part of your configuration is slow.
+
+  Changes:
+    * Starting up no longer compiles a hidden unit to prime code completion.
+      That was the single largest cost of launching the IDE, and it also
+      left a stray __fp__.ppu in whatever directory you started from.
+      Completion for identifiers from other units is now gathered from your
+      first real compile instead, so it appears after the first Alt+F9
+      rather than before the first keystroke. Keyword completion is
+      unaffected and available immediately.
+    * Code completion starts offering after 2 characters instead of 4.
+      Options | Environment | Code complete still sets this.
+    * The IDE opens with the Compiler Messages window showing, with the
+      cursor left in the editor.
+    * The scan for wide (132-column) text modes is remembered in fp.ini, so
+      only the first start after changing graphics card has to probe for
+      them. Probing has to set each mode to test it, which on most displays
+      means a visible flicker or resize per candidate.
+
+  Fixes:
+    * Editing is faster in large text modes. The screen was being sent to
+      the adapter in full whenever any part of it changed; only the changed
+      part is sent now. The wider the mode, the bigger the difference.
+    * Leaving the IDE no longer resets the display mode when it was already
+      the one the IDE started in.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24u / Compiler 3.3.6u ==
 
   Changes:
