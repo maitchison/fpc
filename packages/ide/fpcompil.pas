@@ -1165,8 +1165,9 @@ begin
   if Not Assigned(Modules) and (CompilationPhase<>cpDone) and
      ((DesktopFileFlags and dfSymbolInformation)<>0) then
     ReadSymbolsFile(BrowserName);
-  if UseAllUnitsInCodeComplete and not assigned(CompilingHiddenFile) then
-    AddAvailableUnitsToCodeComplete(false);
+  if (UseAllUnitsInCodeComplete or UseStandardUnitsInCodeComplete) and
+     not assigned(CompilingHiddenFile) then
+    AddAvailableUnitsToCodeComplete(not UseAllUnitsInCodeComplete);
 end;
 
 function NeedRecompile(Mode :TCompileMode; verbose : boolean): boolean;

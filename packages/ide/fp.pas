@@ -513,12 +513,12 @@ BEGIN
   IDEapp.reload_menubar;
   Phase('menubar');
 
-  { Handle Standard Units }
+  { Handle Standard Units. The standard-unit list is NOT built here: doing so
+    means compiling a synthetic unit before the editor is usable. It is built
+    from the symbol tree after the first real compile instead (fpcompil), or on
+    demand from Options|Environment|Code complete. }
   if UseAllUnitsInCodeComplete then
     AddAvailableUnitsToCodeComplete(false);
-
-  if UseStandardUnitsInCodeComplete and not assigned(UnitsCodeCompleteWords) then
-    AddStandardUnitsToCodeComplete;
   Phase('code complete');
 
   { why are the screen contents parsed at startup? Gabor
