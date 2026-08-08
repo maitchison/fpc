@@ -130,12 +130,16 @@ const
       leaving_after_error = #3'The IDE generated an internal error'#13+
                             #3'and will now be closed.';
 
-{$ifdef DEBUG}
 const
   CloseImmediately : boolean = false;
+  MaxPhases        = 16;
 var
-  StartTime : real;
+  StartTime, PhaseTime : real;
+  PhaseCount, PhaseIdx : integer;
+  PhaseName  : array[1..MaxPhases] of string[20];
+  PhaseSecs  : array[1..MaxPhases] of real;
 
+  {wall clock in seconds; gettime ticks at 55ms, so treat sub-0.1s deltas as noise}
   function getrealtime : real;
   var
     h,m,s,s100 : word;
@@ -144,7 +148,22 @@ var
     getrealtime:=h*3600.0+m*60.0+s+s100/100.0;
   end;
 
-{$endif DEBUG}
+  {records elapsed since the previous phase. Collected rather than printed, so
+   the timings are not distorted by console output mid-startup.}
+  procedure Phase(const AName : string);
+  var
+    Now : real;
+  begin
+    Now:=getrealtime;
+    if CloseImmediately and (PhaseCount<MaxPhases) then
+      begin
+        Inc(PhaseCount);
+        PhaseName[PhaseCount]:=AName;
+        PhaseSecs[PhaseCount]:=Now-PhaseTime;
+      end;
+    PhaseTime:=Now;
+  end;
+
 
 procedure ProcessParams(BeforeINI: boolean);
 
@@ -244,8 +263,8 @@ begin
          { 'M' : TryToMaximizeScreen:=true;}
 {$ifdef DEBUG}
           'Z' : UseOldBufStreamMethod:=true;
-          'X' : CloseImmediately:=true;
 {$endif DEBUG}
+          'X' : CloseImmediately:=true;
         end;
       end
     else
@@ -433,9 +452,8 @@ BEGIN
  {$endif Windows}
 {$endif NODEBUG}
 
-{$ifdef DEBUG}
   StartTime:=getrealtime;
-{$endif DEBUG}
+  PhaseTime:=StartTime;
 
   InitDirs;
 
@@ -447,6 +465,7 @@ BEGIN
     writeln(bullet+' Using configuration files from: ',DirOf(LocateFile(INIFileName)));
 
   InitCompilerSwitches;
+  Phase('init+switches');
 
 {$ifdef VESA}
   writeln(stderr,'If program stops, try again using -novesa option');
@@ -455,6 +474,7 @@ BEGIN
   if RegisteredVesaVideoModeCount > 0 then
     SetVESAVideoDriver;
 {$endif}
+  Phase('vesa+s3 probe');
   InitRedir;
 {$ifndef NODEBUG}
   InitBreakpoints;
@@ -473,20 +493,25 @@ BEGIN
 
   { init target information etc. }
   InitSystems;
+  Phase('subsystems');
 
   IDEApp.Init;
+  Phase('app+video init');
   CheckINIFile;
   ReadSwitches(SwitchesPath);
   { load all options after init because of open files }
   ReadINIFile;
+  Phase('read ini');
   InitDesktopFile;
   LoadDesktop;
+  Phase('load desktop');
 
   {Adjust to current directory, might be changed by LoadDesktop.}
   IDEapp.CurDirChanged;
 
   {Menubar might be changed because of loading INI file.}
   IDEapp.reload_menubar;
+  Phase('menubar');
 
   { Handle Standard Units }
   if UseAllUnitsInCodeComplete then
@@ -494,6 +519,7 @@ BEGIN
 
   if UseStandardUnitsInCodeComplete and not assigned(UnitsCodeCompleteWords) then
     AddStandardUnitsToCodeComplete;
+  Phase('code complete');
 
   { why are the screen contents parsed at startup? Gabor
     to be able to find location of error in last compilation
@@ -511,6 +537,7 @@ BEGIN
   IDEApp.UpdateClockAndHeap;
 
   ProcessParams(false);
+  Phase('update+params');
 
   if ShowReadme then
   begin
@@ -531,9 +558,7 @@ BEGIN
 
     if SetJmpRes=0 then
       begin
-{$ifdef DEBUG}
         if not CloseImmediately then
-{$endif DEBUG}
           IDEApp.Run;
       end
     else
@@ -653,8 +678,10 @@ BEGIN
   {$pop}
 {$endif}
   StreamError:=nil;
-{$ifdef DEBUG}
   if CloseImmediately then
-    writeln('Used time is ',getrealtime-StartTime:0:2);
-{$endif DEBUG}
+    begin
+      for PhaseIdx:=1 to PhaseCount do
+        writeln('  ',PhaseName[PhaseIdx]:16,' ',PhaseSecs[PhaseIdx]:6:2);
+      writeln('Startup time is ',getrealtime-StartTime:0:2);
+    end;
 END.
