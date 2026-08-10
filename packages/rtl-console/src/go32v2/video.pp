@@ -32,6 +32,15 @@ var
   mode has a smaller cell. }
 procedure RefreshCursorMetrics;
 
+{ Read the dimensions the BIOS actually realized back into
+  ScreenWidth/ScreenHeight/ScreenColor (INT 10h, AH=1Bh; no-op where that
+  call is unsupported). A mode set is a request, not a guarantee: DOSBox-X
+  with 'ttf cols/lins' pins the console size, so the mode 3 behind an
+  80-column request can come back 132 columns wide, and painting at the
+  requested stride then interleaves every row. Call after any INT 10h
+  mode change. }
+procedure RefreshScreenDims;
+
 
 implementation
 
@@ -99,6 +108,11 @@ begin
   end;
   global_dos_free(LSel);
   BIOSGetScreenMode:=OK;
+end;
+
+procedure RefreshScreenDims;
+begin
+  BIOSGetScreenMode(ScreenWidth,ScreenHeight,ScreenColor);
 end;
 
 procedure SysInitVideo;
@@ -376,6 +390,7 @@ begin
       ScreenWidth:=SysVMD[I].Col;
       ScreenHeight:=SysVMD[I].Row;
       ScreenColor:=SysVMD[I].Color;
+      RefreshScreenDims;
       DoCustomMouse(false);
     end;
 end;

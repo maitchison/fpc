@@ -5,6 +5,23 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24w / Compiler 3.3.6w ==
+
+  Fixes:
+    * Starting the IDE in a console the BIOS reinterprets no longer garbles
+      the screen. A video mode set is a request, not a guarantee: DOSBox-X
+      launched with `ttf cols=132' pins the console width, so the 80-column
+      mode behind a saved 80x50 desktop comes back 132 columns wide. The
+      IDE trusted the requested dimensions and painted at the wrong stride,
+      interleaving every row. The realized dimensions are now read back
+      from the BIOS after every mode change and used instead, so the IDE
+      simply comes up at whatever size the console really is. On hardware
+      that honours the request exactly, nothing changes.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24v / Compiler 3.3.6v ==
 
   New features:

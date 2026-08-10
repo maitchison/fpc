@@ -540,6 +540,11 @@ function SetVESAMode(const VideoMode: TVideoMode): Boolean;
                   else
 {$endif TESTGRAPHIC}
                     begin
+                      { The set can be reinterpreted by the host -- DOSBox-X
+                        with 'ttf cols/lins' pins the console size -- so read
+                        the realized dimensions back rather than trusting the
+                        mode entry. }
+                      Video.RefreshScreenDims;
                       { Wide text modes (132x50, 132x60, ...) often use a
                         smaller font than 80x25, but the RTL only sampled
                         the cell height at SysInitVideo. Re-query so the
