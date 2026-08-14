@@ -646,6 +646,10 @@ BEGIN
 
   DelTempFiles;
   RestoreDefaultPalette;
+{$ifdef DOS}
+  { DoneUserScreen restores the exact saved BIOS mode and screen below. }
+  Drivers.RestoreVideoModeOnExit:=false;
+{$endif DOS}
   IDEApp.Done;
   WriteSwitches(SwitchesPath);
 

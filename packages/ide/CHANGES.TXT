@@ -5,6 +5,20 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24x / Compiler 3.3.6w ==
+
+  Fixes:
+    * Leaving the DOS IDE now restores the original text mode and full screen
+      contents in one mode change. Free Vision previously selected a matching
+      mode by dimensions before the IDE restored the exact saved BIOS mode.
+      The screen saver also trusted the legacy 4 KB BIOS page size even when
+      DOSBox-X pinned the console at 132x60, so only the first part of the
+      command screen was restored and the rest was blank.
+
+  No PPU format change -- units stamp 336 still applies, all 3.3.6*
+  installs continue to share the same X:\fpc\units\336\ tree.
+
+
 == IDE 1.0.24w / Compiler 3.3.6w ==
 
   Fixes:

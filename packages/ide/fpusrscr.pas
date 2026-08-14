@@ -684,7 +684,6 @@ begin
   if (MI.StateSize>0) and (MI.StateBuf<>nil) then
      begin FreeMem(MI.StateBuf,MI.StateSize); MI.StateBuf:=nil; end;
 
-  MI.ScreenSize:=MemW[Seg0040:$4c];
   r.ah:=$0f;
   intr($10,r);
   MI.Mode:=r.al;
@@ -694,8 +693,9 @@ begin
   VESAGetMode(MI.Mode);
   MI.Mode:=MI.Mode and $fff;
 {$endif}
-  MI.Rows:=MI.ScreenSize div (MI.Cols*2);
-  if MI.Rows=51 then MI.Rows:=50;
+  MI.Rows:=Mem[Seg0040:$84]+1;
+  { A host may pin wider dimensions without updating the legacy page size. }
+  MI.ScreenSize:=MI.Cols*MI.Rows*2;
   r.ah:=$03;
   r.bh:=MI.Page;
   intr($10,r);

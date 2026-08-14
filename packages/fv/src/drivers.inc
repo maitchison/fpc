@@ -718,6 +718,7 @@ CONST
    StartupMode  : Sw_Word = $FFFF;                       { Compatibility only }
    CursorLines  : Sw_Word = $FFFF;                       { Compatibility only }
    ScreenBuffer : Pointer = Nil;                      { Compatibility only }
+   RestoreVideoModeOnExit : Boolean = True;
    SaveInt09    : Pointer = Nil;                      { Compatibility only }
    SysErrorFunc : TSysErrorFunc = {$ifdef FPC}@{$endif}SystemError; { System error ptr }
 
@@ -1658,9 +1659,10 @@ BEGIN
 {$IFNDEF WINDOWS}
   { SetVideoMode does not check whether the mode is already current, and on a
     real adapter a mode set is a visible reprogram, so only restore if it differs. }
-  if (ScreenMode.Col<>StartupScreenMode.Col) or
-     (ScreenMode.Row<>StartupScreenMode.Row) or
-     (ScreenMode.Color<>StartupScreenMode.Color) then
+  if RestoreVideoModeOnExit and
+     ((ScreenMode.Col<>StartupScreenMode.Col) or
+      (ScreenMode.Row<>StartupScreenMode.Row) or
+      (ScreenMode.Color<>StartupScreenMode.Color)) then
     {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.SetVideoMode(StartupScreenMode);
   {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.ClearScreen;
   {$IFDEF FPC_DOTTEDUNITS}System.Console.{$ENDIF}Video.SetCursorPos(0,0);
