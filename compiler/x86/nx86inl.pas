@@ -757,6 +757,19 @@ implementation
            end;
 {$endif not i8086}
 
+{$ifdef i386}
+         if (inlinenumber in [in_sar_assign_x_y,in_shl_assign_x_y,in_shr_assign_x_y,
+             in_rol_assign_x_y,in_ror_assign_x_y]) and
+            not is_constintnode(tcallparanode(left).left) then
+           begin
+             { the destination address must not take over the variable shift-count register }
+             cg.getcpuregister(current_asmdata.CurrAsmList,NR_ECX);
+             inherited second_AndOrXorShiftRot_assign;
+             cg.ungetcpuregister(current_asmdata.CurrAsmList,NR_ECX);
+             exit;
+           end;
+{$endif i386}
+
          inherited second_AndOrXorShiftRot_assign;
        end;
 
