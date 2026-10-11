@@ -4919,8 +4919,15 @@ procedure read_arguments(cmd:TCmdStr);
         to pass -dCPUX86_HAS_MMX manually. Only the flags actually consulted
         by source-level $ifdef chains today are emitted here; add more as
         needed. }
+      {$ifdef i386}
+        { CPUX86_HAS_MMX exists only in i386/cpuinfo.pas -- x86_64 always has
+          MMX, so upstream never gave it a capability flag. Guarding this at
+          i386 keeps an x86_64-hosted build compiling; without it, building
+          the native host compiler on an x86_64 host dies with
+          "Identifier not found CPUX86_HAS_MMX". }
         if CPUX86_HAS_MMX in cpu_capabilities[init_settings.cputype] then
           def_system_macro('CPUX86_HAS_MMX');
+      {$endif}
         if CPUX86_HAS_SSEUNIT in cpu_capabilities[init_settings.cputype] then
           def_system_macro('CPUX86_HAS_SSEUNIT');
         if CPUX86_HAS_SSE2 in cpu_capabilities[init_settings.cputype] then
@@ -5033,6 +5040,10 @@ begin
   { make cpu makros available when reading the config files the second time }
   def_cpu_macros;
   set_endianess_macros;
+
+{$ifdef i386}
+  def_system_macro('FPC_HAS_X86_LMS_SHIFT_FIX');
+{$endif}
 
   if tf_cld in target_info.flags then
     if not UpdateTargetSwitchStr('CLD', init_settings.targetswitches, true) then
