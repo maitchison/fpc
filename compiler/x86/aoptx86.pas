@@ -3346,6 +3346,60 @@ unit aoptx86;
       NewConst: TCGInt;
 {$endif x86_64}
 
+{$ifdef i386}
+      function ForwardRepeatedLoad: Boolean;
+        var
+          hp: tai;
+          value_reg, written_reg: TRegister;
+          source_ref: PReference;
+          distance: Integer;
+        begin
+          Result:=False;
+          source_ref:=taicpu(p).oper[0]^.ref;
+          value_reg:=taicpu(p).oper[1]^.reg;
+          if (source_ref^.volatility<>[]) or (source_ref^.segment<>NR_NO) or
+            (source_ref^.refaddr=addr_full) or RegInRef(value_reg,source_ref^) then
+            exit;
+
+          hp:=p;
+          for distance:=1 to 4 do
+            begin
+              hp:=tai(hp.Next);
+              while Assigned(hp) and (hp.typ in
+                [ait_comment,ait_regalloc,ait_tempalloc,ait_varloc,ait_stab,ait_force_line]) do
+                hp:=tai(hp.Next);
+              { Stores, control flow and asm markers end the forwarding window. }
+              if not Assigned(hp) or not MatchInstruction(hp,A_MOV,[]) or
+                (taicpu(hp).oper[1]^.typ<>top_reg) or
+                (GetRegType(taicpu(hp).oper[1]^.reg)<>R_INTREGISTER) then
+                exit;
+              if (taicpu(hp).oper[0]^.typ=top_ref) and
+                ((taicpu(hp).oper[0]^.ref^.volatility<>[]) or
+                 (taicpu(hp).oper[0]^.ref^.segment<>NR_NO)) then
+                exit;
+              if (taicpu(hp).opsize=S_L) and
+                (taicpu(hp).oper[0]^.typ=top_ref) and
+                RefsEqual(source_ref^,taicpu(hp).oper[0]^.ref^) then
+                begin
+                  if Assigned(source_ref^.symbol) then
+                    source_ref^.symbol.decrefs;
+                  if Assigned(source_ref^.relsymbol) then
+                    source_ref^.relsymbol.decrefs;
+                  taicpu(hp).loadreg(0,value_reg);
+                  AllocRegBetween(value_reg,p,hp,UsedRegs);
+                  DebugMsg(SPeepholeOptimization + 'Forwarded repeated memory load',hp);
+                  exit(True);
+                end;
+              written_reg:=taicpu(hp).oper[1]^.reg;
+              if SuperRegistersEqual(value_reg,written_reg) or
+                ((source_ref^.base<>NR_NO) and SuperRegistersEqual(source_ref^.base,written_reg)) or
+                ((source_ref^.index<>NR_NO) and SuperRegistersEqual(source_ref^.index,written_reg)) then
+                exit;
+            end;
+        end;
+{$endif i386}
+
+
       procedure convert_mov_value(signed_movop: tasmop; max_value: tcgint); inline;
         begin
           if taicpu(hp1).opcode = signed_movop then
@@ -3460,6 +3514,14 @@ unit aoptx86;
         op_idx: integer;
       begin
         Result:=false;
+
+{$ifdef i386}
+        if not NotFirstIteration and (taicpu(p).opsize=S_L) and
+          MatchOpType(taicpu(p),top_ref,top_reg) and
+          (GetRegType(taicpu(p).oper[1]^.reg)=R_INTREGISTER) and
+          ForwardRepeatedLoad then
+          exit(True);
+{$endif i386}
 
         {  remove mov reg1,reg1? }
         if MatchOperand(taicpu(p).oper[0]^,taicpu(p).oper[1]^)

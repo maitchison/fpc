@@ -5,6 +5,18 @@ Most recent version first. The IDE shows this file from
 Help | What's new...
 
 
+== IDE 1.0.24y / Compiler 3.3.6y ==
+
+  Compiler:
+    * The i386 peephole optimizer reuses nearby repeated 32-bit loads across
+      a short sequence of MOV instructions. Stores, calls, control flow,
+      volatile accesses and changes to the address or value registers stop
+      forwarding. This reduces reloads around inlined scalar helpers without
+      changing pointer aliasing rules or moving loads outside loops.
+
+  No PPU format change; existing matching units can be retained.
+
+
 == IDE 1.0.24x / Compiler 3.3.6w ==
 
   Fixes:
