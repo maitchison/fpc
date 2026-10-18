@@ -537,11 +537,22 @@ type
 {$ifndef HAS_SYSOSFREE}
   function HeapInc.FreeOSChunkList.Get(minSize, maxSize: SizeUint): pOSChunk;
   var
-    prev, next: pFreeOSChunk;
+    prev, next, c: pFreeOSChunk;
   begin
-    result := first;
-    while Assigned(result) and not ((result^.size >= minSize) and (result^.size <= maxSize)) do
-      result := result^.next;
+    { Best fit: the whole chunk is handed out and counted as used, so the first fit can give a small request a huge chunk
+      (and leave nothing that fits the next big request). The list holds only cached OS chunks, so it is short. }
+    result := nil;
+    c := first;
+    while Assigned(c) do
+    begin
+      if (c^.size >= minSize) and (c^.size <= maxSize) and (not Assigned(result) or (c^.size < result^.size)) then
+      begin
+        result := c;
+        if c^.size = minSize then
+          break;
+      end;
+      c := c^.next;
+    end;
     if not Assigned(result) then
       exit;
 
