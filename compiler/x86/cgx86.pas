@@ -2818,7 +2818,10 @@ unit cgx86;
            ({$ifdef i386}(len=8) or {$endif i386}(len=16) or (len=24) or (len=32)) then
           result:=copy_mmx
         else
-          if len>helpsize then
+          { -OoINLINECOPY=N moves the line for whole words: a 16-byte record
+            (four singles) on a CPU with no SSE is otherwise a call }
+          if (len>helpsize) and
+             not ((len<=inlinecopymax) and ((len mod sizeof(aword))=0)) then
             result:=copy_string;
 
         if (result=copy_string) and not(CPUX86_HINT_FAST_SHORT_REP_MOVS in cpu_optimization_hints[current_settings.optimizecputype]) and

@@ -156,6 +156,8 @@ implementation
                 settings.inlinegrowthcap:=nval
               else if keyname='INLINESITEBUDGET' then
                 settings.inlinesitebudget:=nval
+              else if keyname='INLINECOPY' then
+                inlinecopymax:=nval
               else
                 result:=false;
               continue;

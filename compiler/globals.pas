@@ -331,6 +331,13 @@ Const
 
 
     var
+       { -OoINLINECOPY=N: a record copy of up to N bytes, a whole number of
+         words, is done by moves through a register rather than rep movs or
+         a call to FPC_MOVE. 0 leaves the size to getcopymode's own rule
+         (three words). A whole-compilation knob: kept out of tsettings, so
+         the settings stored with generics in a PPU do not change }
+       inlinecopymax     : longint = 0;
+
        { specified inputfile }
        inputfilepath     : string;
        inputfilename     : string;

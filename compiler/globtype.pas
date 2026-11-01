@@ -503,11 +503,12 @@ interface
          longints rather than on/off; they're listed here so fpc -i / -io
          can enumerate them alongside the boolean switches. Defaults must
          match default_settings in globals.pas. }
-       OptimizerNumericSwitchStr : array[0..3] of toptimizernumericswitchinfo = (
+       OptimizerNumericSwitchStr : array[0..4] of toptimizernumericswitchinfo = (
          (name: 'INLINEAUTOLIMIT';   defval: 25),
          (name: 'INLINEHARDCAP';     defval: 0),
          (name: 'INLINEGROWTHCAP';   defval: 0),
-         (name: 'INLINESITEBUDGET';  defval: 1000)
+         (name: 'INLINESITEBUDGET';  defval: 1000),
+         (name: 'INLINECOPY';        defval: 0)
        );
        WPOptimizerSwitchStr : array [twpoptimizerswitch] of string[14] = (
          'DEVIRTCALLS','OPTVMTS','SYMBOLLIVENESS'
