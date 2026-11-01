@@ -626,7 +626,7 @@ implementation
     function ppuloadnodetree(ppufile:tcompilerppufile):tnode;
       begin
         if ppufile.readentry<>ibnodetree then
-          Message(unit_f_ppu_read_error);
+          begin entfile.ppudiag('node:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
         nodeppuidxcreate;
         result:=ppuloadnode(ppufile);
         nodeppuidxresolve;

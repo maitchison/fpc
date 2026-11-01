@@ -532,7 +532,7 @@ implementation
       begin
         { load the table's flags }
         if ppufile.readentry<>ibsymtableoptions then
-          Message(unit_f_ppu_read_error);
+          begin entfile.ppudiag('symtable:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
         ppufile.getset(tppuset1(tableoptions));
 
         { load definitions }
@@ -570,7 +570,7 @@ implementation
       begin
          { load start of definition section, which holds the amount of defs }
          if ppufile.readentry<>ibstartdefs then
-           Message(unit_f_ppu_read_error);
+           begin entfile.ppudiag('symtable:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
          { read definitions }
          repeat
            b:=ppufile.readentry;
@@ -597,7 +597,7 @@ implementation
              ibvariantdef : def:=cvariantdef.ppuload(ppufile);
              ibundefineddef : def:=cundefineddef.ppuload(ppufile);
              ibenddefs : break;
-             ibend : Message(unit_f_ppu_read_error);
+             ibend : begin entfile.ppudiag('symtable:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
            else
              Message1(unit_f_ppu_invalid_entry,tostr(b));
            end;
@@ -615,7 +615,7 @@ implementation
       begin
          { load start of definition section, which holds the amount of defs }
          if ppufile.readentry<>ibstartsyms then
-          Message(unit_f_ppu_read_error);
+          begin entfile.ppudiag('symtable:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
          { now read the symbols }
          repeat
            sym:=nil;
@@ -637,7 +637,7 @@ implementation
                ibmacrosym : sym:=tmacro.ppuload(ppufile);
            ibnamespacesym : sym:=cnamespacesym.ppuload(ppufile);
                 ibendsyms : break;
-                    ibend : Message(unit_f_ppu_read_error);
+                    ibend : begin entfile.ppudiag('symtable:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
            else
              Message1(unit_f_ppu_invalid_entry,tostr(b));
            end;
@@ -1231,7 +1231,7 @@ implementation
     procedure tabstractrecordsymtable.ppuload(ppufile:tcompilerppufile);
       begin
         if ppufile.readentry<>ibrecsymtableoptions then
-          Message(unit_f_ppu_read_error);
+          begin entfile.ppudiag('symtable:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
         recordalignment:=shortint(ppufile.getbyte);
         explicitrecordalignment:=shortint(ppufile.getbyte);
         usefieldalignment:=shortint(ppufile.getbyte);

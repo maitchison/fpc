@@ -2082,7 +2082,7 @@ var
           tstoredsymtable(globalsymtable).ppuload(ppufile);
 
           if ppufile.readentry<>ibexportedmacros then
-            Message(unit_f_ppu_read_error);
+            begin entfile.ppudiag('fppu:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
           if boolean(ppufile.getbyte) then
             begin
               globalmacrosymtable:=tmacrosymtable.Create(true);

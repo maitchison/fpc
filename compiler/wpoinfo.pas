@@ -126,7 +126,7 @@ implementation
     begin
       { load start of definition section, which holds the amount of defs }
       if ppufile.readentry<>ibcreatedobjtypes then
-        message(unit_f_ppu_read_error);
+        begin entfile.ppudiag('wpoinfo:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
 
       { don't load the wpo info from the units if we are not generating
         a wpo feedback file (that would just take time and memory)

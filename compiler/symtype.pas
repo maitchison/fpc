@@ -240,6 +240,7 @@ interface
 implementation
 
     uses
+       entfile,
        crefs,
        verbose,
        fmodule
@@ -1058,7 +1059,7 @@ implementation
     procedure tcompilerppufile.checkerror;
       begin
         if error then
-         Message(unit_f_ppu_read_error);
+         begin entfile.ppudiag('symtype:'+{$I %LINE%}); Message(unit_f_ppu_read_error) end;
       end;
 
     procedure tcompilerppufile.RaiseAssertion(Code: Longint);

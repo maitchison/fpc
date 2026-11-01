@@ -354,6 +354,10 @@ type
     function  tempopen:boolean; // MG: not used, obsolete?
   end;
 
+var
+  last_entryfile : tentryfile = nil;
+procedure ppudiag(const where: shortstring);
+
 implementation
 
   uses
@@ -373,6 +377,21 @@ var
 begin
   for i:=low(entryreal_bytes) to high(entryreal_bytes) do
     entryreal_bytes(result)[i]:=entryreal_bytes(d)[high(entryreal_bytes)-i];
+end;
+
+
+procedure ppudiag(const where: shortstring);
+begin
+  if assigned(last_entryfile) then
+    with last_entryfile do
+      writeln('PPUDIAG ',where,' file=',fname,' fsize=',fsize,' bufstart=',bufstart,
+        ' bufsize=',bufsize,' bufidx=',bufidx,' entry.id=',entry.id,' entry.nr=',entry.nr,
+        ' entry.size=',entry.size,' entryidx=',entryidx,' entrystart=',entrystart,
+        ' mode=',mode,' closed=',closed,' strmpos=',f.position,' strmsize=',f.size,
+        ' cstreamerror=',CStreamError)
+  else
+    writeln('PPUDIAG ',where,' no entryfile');
+  flush(output);
 end;
 
 {*****************************************************************************
@@ -715,6 +734,7 @@ var
   i : integer;
 {$endif DEBUG_PPU}
 begin
+  last_entryfile:=self;
   p:=pchar(@b);
   pbuf:=@buf[bufidx];
   repeat
@@ -727,7 +747,7 @@ begin
     reloadbuf;
     pbuf:=@buf[bufidx];
     if bufsize=0 then
-      exit;
+      begin ppudiag('entfile:readdata-short'); exit; end;
   until false;
   move(pbuf^,p^,len);
 {$ifdef DEBUG_PPU}
@@ -768,7 +788,7 @@ begin
         dec(len,left);
         reloadbuf;
         if bufsize=0 then
-         exit;
+         begin ppudiag('entfile:skipdata-short'); exit; end;
       end
      else
       begin
@@ -781,6 +801,7 @@ end;
 
 function tentryfile.readentry:byte;
 begin
+  last_entryfile:=self;
   if entryidx<entry.size then
     begin
 {$ifdef generic_cpu}
@@ -808,7 +829,7 @@ begin
   if not(entry.id in [mainentryid,subentryid]) then
    begin
      readentry:=iberror;
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      exit;
    end;
   readentry:=entry.nr;
@@ -851,7 +872,7 @@ procedure tentryfile.getdata(out b;len:integer);
 begin
   if entryidx+len>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      exit;
    end;
   readdata(b,len);
@@ -862,7 +883,7 @@ procedure tentryfile.getdata(b: TByteDynArray);
 begin
   if entryidx+Length(b)>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      exit;
    end;
   readdata(b);
@@ -873,7 +894,7 @@ procedure tentryfile.getdata(b: TAnsiCharDynArray);
 begin
   if entryidx+Length(b)>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      exit;
    end;
   readdata(b);
@@ -885,7 +906,7 @@ function tentryfile.getbyte:byte;
 begin
   if entryidx>=entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:=0;
      exit;
    end;
@@ -912,7 +933,7 @@ function tentryfile.getword:word;
 begin
   if entryidx+2>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:=0;
      exit;
    end;
@@ -941,7 +962,7 @@ function tentryfile.getlongint:longint;
 begin
   if entryidx+4>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:=0;
      exit;
    end;
@@ -970,7 +991,7 @@ function tentryfile.getdword:dword;
 begin
   if entryidx+4>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:=0;
      exit;
    end;
@@ -999,7 +1020,7 @@ function tentryfile.getint64:int64;
 begin
   if entryidx+8>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:=0;
      exit;
    end;
@@ -1028,7 +1049,7 @@ function tentryfile.getqword:qword;
 begin
   if entryidx+8>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:=0;
      exit;
    end;
@@ -1075,7 +1096,7 @@ begin
     result:=shortint(getbyte)
   else
     begin
-      error:=true;
+      begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
       result:=0;
     end;
 {$else not generic_cpu}
@@ -1126,7 +1147,7 @@ begin
     end
   else
     begin
-      error:=true;
+      begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
       result:=0;
     end;
 {$else not generic_cpu}
@@ -1169,7 +1190,7 @@ begin
     result:=getword
   else
     begin
-      error:=true;
+      begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
       result:=0;
     end;
 {$else not generic_cpu}
@@ -1243,7 +1264,7 @@ begin
     result:=getbyte
   else
     begin
-      error:=true;
+      begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
       result:=0;
     end;
 {$else not generic_cpu}
@@ -1317,7 +1338,7 @@ begin
 {$endif}
       if entryidx+sizeof(floatx80_ba)>entry.size then
        begin
-         error:=true;
+         begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
          result:=0;
 {$ifdef DEBUG_PPU}
          ppu_log_val(realtostr(result));
@@ -1357,7 +1378,7 @@ begin
 {$endif}
       if entryidx+sizeof(e)>entry.size then
        begin
-         error:=true;
+         begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
          result:=0;
 {$ifdef DEBUG_PPU}
          ppu_log_val(realtostr(result));
@@ -1385,7 +1406,7 @@ begin
 {$endif}
       if entryidx+sizeof(d)>entry.size then
        begin
-         error:=true;
+         begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
          result:=0;
 {$ifdef DEBUG_PPU}
          ppu_log_val(realtostr(result));
@@ -1416,7 +1437,7 @@ begin
 {$endif}
       if entryidx+sizeof(s)>entry.size then
        begin
-         error:=true;
+         begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
          result:=0;
 {$ifdef DEBUG_PPU}
          ppu_log_val(realtostr(result));
@@ -1439,7 +1460,7 @@ begin
 {$endif}
       exit;
     end;
-  error:=true;
+  begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
   result:=0.0;
 end;
 
@@ -1490,7 +1511,7 @@ begin
 {$endif}
   if entryidx+length(result)>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      exit;
    end;
   ReadData(result[1],length(result));
@@ -1513,7 +1534,7 @@ begin
 {$endif}
   if entryidx+ord(len)>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      exit;
    end;
   getmem(result,ord(len)+1);
@@ -1537,7 +1558,7 @@ begin
   len:=getlongint;
   if entryidx+len>entry.size then
    begin
-     error:=true;
+     begin ppudiag('entfile:'+{$I %LINE%}); error:=true; end;
      result:='';
      exit;
    end;
